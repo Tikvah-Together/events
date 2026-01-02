@@ -9,6 +9,7 @@ function App() {
         <Routes>
           <Route path="/" element={<RegistrationForm />} />
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/gate" element={<Gatekeeper />} />
         </Routes>
       </div>
     </Router>
