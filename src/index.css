@@ -30,6 +30,18 @@ body {
   min-height: 100vh;
 }
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-50 antialiased;
+}
+
+input, select {
+  @apply focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all;
+}
+
 h1 {
   font-size: 3.2em;
   line-height: 1.1;
