@@ -79,7 +79,7 @@ export default function RegistrationForm() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto p-4 bg-white shadow-lg rounded-xl my-8">
+    <div className="max-w-2xl mx-auto py-12 px-4 bg-white">
       <h2 className="text-2xl font-bold text-center text-blue-900 mb-6">Event Registration</h2>
       
       <form onSubmit={handleSubmit} className="space-y-6">
