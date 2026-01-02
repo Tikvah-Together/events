@@ -79,8 +79,9 @@ export default function RegistrationForm() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto py-12 px-4 bg-white">
-      <h2 className="text-2xl font-bold text-center text-blue-900 mb-6">Event Registration</h2>
+    <div className="min-h-screen bg-white py-12 px-4">
+    <div className="max-w-xl mx-auto">
+      <h2 className="text-3xl font-bold text-slate-800 mb-8 text-center">Event Registration</h2>
       
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Event Selection */}
@@ -226,6 +227,7 @@ export default function RegistrationForm() {
           {loading ? "Saving..." : "Register for Event"}
         </button>
       </form>
+    </div>
     </div>
   );
 }

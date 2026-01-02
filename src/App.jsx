@@ -3,6 +3,7 @@ import RegistrationForm from './RegistrationForm';
 import AdminDashboard from './AdminDashboard';
 import Gatekeeper from './Gatekeeper';
 import EventController from './EventController';
+import AdminGuard from './AdminGuard';
 
 function Home() {
   return (
@@ -31,16 +32,14 @@ function App() {
   return (
     <Router>
       <div className="min-h-screen bg-white">
-        {/* Simple Minimalist Nav */}
         <nav className="border-b border-slate-100 py-6">
           <div className="max-w-6xl mx-auto px-6 flex justify-between items-center">
             <Link to="/" className="text-2xl font-bold tracking-tighter text-slate-800">
               TIKVAH<span className="text-blue-900 text-sm align-top ml-1">●</span>
             </Link>
-            <div className="hidden md:flex space-x-8 text-sm uppercase tracking-widest font-semibold text-slate-500">
-              <Link to="/register" className="hover:text-blue-900 transition">Register</Link>
-              <Link to="/gate" className="hover:text-blue-900 transition">Check-In</Link>
-              <Link to="/live" className="text-red-600 hover:text-red-700 transition">Live</Link>
+            <div className="flex space-x-8 text-sm uppercase tracking-widest font-semibold text-slate-500">
+              <Link to="/register" className="hover:text-blue-900">Register</Link>
+              <Link to="/admin" className="hover:text-blue-900">Admin</Link>
             </div>
           </div>
         </nav>
@@ -50,9 +49,11 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/register" element={<RegistrationForm />} />
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/gate" element={<Gatekeeper />} />
-            <Route path="/live" element={<EventController />} />
+            
+            {/* PROTECTED ROUTES */}
+            <Route path="/admin" element={<AdminGuard><AdminDashboard /></AdminGuard>} />
+            <Route path="/gate" element={<AdminGuard><Gatekeeper /></AdminGuard>} />
+            <Route path="/live" element={<AdminGuard><EventController /></AdminGuard>} />
           </Routes>
         </main>
 
