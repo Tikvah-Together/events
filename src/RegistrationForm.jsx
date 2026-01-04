@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from './firebase';
-import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
+import { useSearchParams } from 'react-router-dom';
 import { Check, User, Heart, Calendar } from 'lucide-react';
 
 const RELIGIOUS_SUBGROUPS = ['Chabad', 'Chasidish', 'Haredi', 'Yeshivish', 'Modern Yeshivish', 'Modern Orthodox Machmir', 'Heimish', 'Out of the box'];
@@ -8,12 +9,15 @@ const ETHNICITIES = ['Ashkenazi', 'Sephardi (Syrian)', 'Sephardi (Persian)', 'Se
 const MARITAL_STATUSES = ['single', 'single with kids', 'divorced', 'divorced with kids', 'widowed', 'widowed with kids'];
 
 export default function RegistrationForm() {
+  const [searchParams] = useSearchParams();
+  const urlEventId = searchParams.get('eventId'); // Get ?eventId=XYZ from URL
+
   const [events, setEvents] = useState([]);
+  const [selectedEventName, setSelectedEventName] = useState(""); // To show name if ID is hidden
   const [loading, setLoading] = useState(false);
   
-  // Form State
   const [formData, setFormData] = useState({
-    eventId: '',
+    eventId: urlEventId || '',
     name: '',
     gender: '',
     targetGender: '',
@@ -30,15 +34,25 @@ export default function RegistrationForm() {
     openToMaritalStatus: []
   });
 
-  // Fetch active events for the dropdown
+// Fetch events or specific event name
   useEffect(() => {
-    const fetchEvents = async () => {
-      const q = query(collection(db, "events"), where("active", "==", true));
-      const snap = await getDocs(q);
-      setEvents(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const fetchEventData = async () => {
+      if (urlEventId) {
+        // If we have an ID, just get that one event's name for the header
+        const docRef = doc(db, "events", urlEventId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setSelectedEventName(docSnap.data().name);
+        }
+      } else {
+        // Otherwise, fetch all active events for the dropdown
+        const q = query(collection(db, "events"), where("active", "==", true));
+        const snap = await getDocs(q);
+        setEvents(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }
     };
-    fetchEvents();
-  }, []);
+    fetchEventData();
+  }, [urlEventId]);
 
   const calculateAge = (dateString) => {
     const today = new Date();
@@ -57,7 +71,7 @@ export default function RegistrationForm() {
     setFormData({ ...formData, [field]: current });
   };
 
-  const handleSubmit = async (e) => {
+const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.eventId) return alert("Please select an event");
     setLoading(true);
@@ -66,10 +80,10 @@ export default function RegistrationForm() {
       await addDoc(collection(db, "registrations"), {
         ...formData,
         age: calculateAge(formData.birthDate),
-        checkedIn: false, // Required for your admin entry logic
+        checkedIn: false,
         timestamp: new Date()
       });
-      alert("Registration successful! Please check in with the Admin at the event.");
+      alert("Registration successful!");
       window.location.reload();
     } catch (err) {
       console.error(err);
@@ -82,23 +96,28 @@ export default function RegistrationForm() {
     <div className="min-h-screen bg-white py-12 px-4">
     <div className="max-w-xl mx-auto">
       <h2 className="text-3xl font-bold text-slate-800 mb-8 text-center">Event Registration</h2>
+
+      {/* Conditional UI: Show name if ID is in URL, otherwise show dropdown */}
+        {urlEventId ? (
+          <p className="text-center text-blue-600 font-medium mb-8">Registering for: {selectedEventName || "Loading event..."}</p>
+        ) : (
+          <div className="mb-8">
+            <label className="block font-semibold mb-2 text-center text-slate-600">Select Event</label>
+            <select 
+              required
+              className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              value={formData.eventId}
+              onChange={(e) => setFormData({...formData, eventId: e.target.value})}
+            >
+              <option value="">-- Choose an Event --</option>
+              {events.map(ev => (
+                <option key={ev.id} value={ev.id}>{ev.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Event Selection */}
-        <section>
-          <label className="block font-semibold mb-2">Select Event</label>
-          <select 
-            required
-            className="w-full p-3 border rounded-lg shadow-sm"
-            onChange={(e) => setFormData({...formData, eventId: e.target.value})}
-          >
-            <option value="">-- Choose an Event --</option>
-            {events.map(ev => (
-              <option key={ev.id} value={ev.id}>{ev.name}</option>
-            ))}
-          </select>
-        </section>
-
         {/* Basic Info */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <input 
