@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "tikvah-together-events"
-  }
+    "default": "ttevents-81927"
+  },
+  "targets": {},
+  "etags": {}
 }
