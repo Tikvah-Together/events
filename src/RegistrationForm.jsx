@@ -2,11 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { db } from './firebase';
 import { collection, addDoc, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 import { useSearchParams } from 'react-router-dom';
-import { Check, User, Heart, Calendar } from 'lucide-react';
 
 const RELIGIOUS_SUBGROUPS = ['Chabad', 'Chasidish', 'Haredi', 'Yeshivish', 'Modern Yeshivish', 'Modern Orthodox Machmir', 'Heimish', 'Out of the box'];
 const ETHNICITIES = ['Ashkenazi', 'Sephardi (Syrian)', 'Sephardi (Persian)', 'Sephardi (Moroccan)', 'Sephardi (Other)'];
-const MARITAL_STATUSES = ['single', 'single with kids', 'divorced', 'divorced with kids', 'widowed', 'widowed with kids'];
+const MARITAL_STATUSES = ['Single', 'Single with kids', 'Divorced', 'Divorced with kids', 'Widowed', 'Widowed with kids'];
 
 export default function RegistrationForm() {
   const [searchParams] = useSearchParams();
@@ -22,7 +21,7 @@ export default function RegistrationForm() {
     gender: '',
     targetGender: '',
     birthDate: '',
-    ageRange: { min: 20, max: 40 },
+    ageRange: { min: 18, max: 40 },
     parents: '',
     religiousLevel: '',
     subGroup: '',
@@ -45,8 +44,8 @@ export default function RegistrationForm() {
           setSelectedEventName(docSnap.data().name);
         }
       } else {
-        // Otherwise, fetch all active events for the dropdown
-        const q = query(collection(db, "events"), where("active", "==", true));
+        // Otherwise, fetch all events for the dropdown. They should be inactive.
+        const q = query(collection(db, "events"), where("active", "==", false));
         const snap = await getDocs(q);
         setEvents(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       }
@@ -119,17 +118,23 @@ const handleSubmit = async (e) => {
       
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Info */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input 
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="block text-sm font-medium mb-1">Your Name</label>
+            <input 
             type="text" placeholder="What's your name?" required
             className="p-3 border rounded-lg"
             onChange={(e) => setFormData({...formData, name: e.target.value})}
           />
-          <input 
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-medium mb-1">Your Birth Date</label>
+            <input 
             type="date" required
             className="p-3 border rounded-lg text-gray-500"
             onChange={(e) => setFormData({...formData, birthDate: e.target.value})}
           />
+          </div>
         </div>
 
         {/* Gender Choice */}
@@ -151,6 +156,23 @@ const handleSubmit = async (e) => {
             </select>
           </div>
         </div>
+
+        {/* Target Age Range Choice */}
+        <section>
+          <label className="block font-semibold mb-2">Preferred Age Range</label>
+          <div className="flex gap-4">
+            <input 
+              type="number" min="18" max="100" placeholder="Min Age" required
+              className="w-full p-3 border rounded-lg"
+              onChange={(e) => setFormData({...formData, ageRange: {...formData.ageRange, min: parseInt(e.target.value)}})}
+            />
+            <input 
+              type="number" min="18" max="100" placeholder="Max Age" required
+              className="w-full p-3 border rounded-lg"
+              onChange={(e) => setFormData({...formData, ageRange: {...formData.ageRange, max: parseInt(e.target.value)}})}
+            />
+          </div>
+        </section>
 
         {/* Parents Background */}
         <section>

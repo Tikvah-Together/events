@@ -12,7 +12,16 @@ import {
   onSnapshot,
   where,
 } from "firebase/firestore";
-import { Plus, Trash2, Users, Calendar, Play, Square } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Users,
+  Calendar,
+  Play,
+  Square,
+  UserMinus,
+  CheckCircle,
+} from "lucide-react";
 
 export default function AdminDashboard() {
   const [events, setEvents] = useState([]);
@@ -22,14 +31,22 @@ export default function AdminDashboard() {
   const [roundTime, setRoundTime] = useState(7);
   const [loading, setLoading] = useState(false);
 
-const toggleStatus = async (id, currentStatus) => {
+  const toggleStatus = async (id, currentStatus) => {
     try {
       const eventRef = doc(db, "events", id);
       const newStatus = !currentStatus;
 
       // 1. Update Firestore
       await updateDoc(eventRef, { active: newStatus });
-      launchEvent();
+      if (newStatus) {
+        // delete all non-checked-in attendees when activating
+        await deleteAttendeesNotCheckedIn(id);
+        // If activating, launch the event
+        launchEvent();
+      } else {
+        // If deactivating, set all attendees to not checked in
+        // await setAttendeesNotCheckedIn(id);
+      }
 
       // 2. Update the Main Detail View immediately
       setSelectedEvent((prev) => ({ ...prev, active: newStatus }));
@@ -45,12 +62,37 @@ const toggleStatus = async (id, currentStatus) => {
     }
   };
 
+  const deleteAttendeesNotCheckedIn = async (id) => {
+    const attQuery = query(
+      collection(db, "registrations"),
+      where("eventId", "==", id),
+      where("checkedIn", "==", false)
+    );
+    const attSnap = await getDocs(attQuery);
+    const deletePromises = attSnap.docs.map((doc) => deleteDoc(doc.ref));
+    await Promise.all(deletePromises);
+  };
+
+  const setAttendeesNotCheckedIn = async (id) => {
+    const attQuery = query(
+      collection(db, "registrations"),
+      where("eventId", "==", id)
+    );
+    const attSnap = await getDocs(attQuery);
+    const resetPromises = attSnap.docs.map((doc) =>
+      updateDoc(doc.ref, { checkedIn: false, tableNumber: null })
+    );
+    await Promise.all(resetPromises);
+  };
+
   const launchEvent = async () => {
     const men = attendees.filter((a) => a.gender === "man" && a.checkedIn);
     const women = attendees.filter((a) => a.gender === "woman" && a.checkedIn);
 
     if (men.length === 0 || women.length === 0) {
-      return alert("You need checked-in men and women to start!");
+      alert("You need checked-in men and women to start!");
+      toggleStatus(selectedEvent.id, true); // Revert the event to inactive
+      return;
     }
 
     // 1. Auto-Assign Tables
@@ -170,23 +212,75 @@ const toggleStatus = async (id, currentStatus) => {
     return () => unsubscribe();
   }, [selectedEvent]);
 
+  useEffect(() => {
+    const cleanupOldEvents = async () => {
+      const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000);
+
+      // We only want to delete events that have a scheduledAt date
+      const q = query(
+        collection(db, "events"),
+        where("scheduledAt", "<", seventyTwoHoursAgo)
+      );
+      const snapshot = await getDocs(q);
+
+      snapshot.forEach(async (eventDoc) => {
+        // Delete registrations first (optional but recommended for data hygiene)
+        const regQ = query(
+          collection(db, "registrations"),
+          where("eventId", "==", eventDoc.id)
+        );
+        const regSnap = await getDocs(regQ);
+        regSnap.forEach(
+          async (r) => await deleteDoc(doc(db, "registrations", r.id))
+        );
+
+        // Delete the event itself
+        await deleteDoc(doc(db, "events", eventDoc.id));
+        console.log(`Auto-deleted expired event: ${eventDoc.id}`);
+      });
+    };
+
+    if (events.length > 0) {
+      cleanupOldEvents();
+    }
+  }, [events]);
+
+  const [eventDate, setEventDate] = useState("");
+  const [eventTime, setEventTime] = useState("");
+
   const createEvent = async () => {
-    if (!eventName) return alert("Enter a name!");
+    if (!eventName || !eventDate || !eventTime)
+      return alert("Please fill in all event details!");
     setLoading(true);
     try {
+      // Combine date and time strings into a single Date object
+      const scheduledDateTime = new Date(`${eventDate}T${eventTime}`);
+
       await addDoc(collection(db, "events"), {
         name: eventName,
         roundTime: parseInt(roundTime),
         active: false,
         currentRound: 1,
         createdAt: new Date(),
+        scheduledAt: scheduledDateTime, // This is what we use for the 72h check
       });
+
       setEventName("");
-      alert("Event Created!");
+      setEventDate("");
+      setEventTime("");
     } catch (err) {
       console.error(err);
     }
     setLoading(false);
+  };
+
+  const updateAttendeeField = async (attendeeId, field, newValue) => {
+    try {
+      const attRef = doc(db, "registrations", attendeeId);
+      await updateDoc(attRef, { [field]: newValue });
+    } catch (err) {
+      console.error(`Error updating ${field}:`, err);
+    }
   };
 
   const deleteEvent = async (id) => {
@@ -215,6 +309,27 @@ const toggleStatus = async (id, currentStatus) => {
             value={eventName}
             onChange={(e) => setEventName(e.target.value)}
           />
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-400 uppercase">
+              Event Date & Time
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                className="flex-1 p-2 border border-slate-200 rounded text-xs outline-none"
+                value={eventDate}
+                onChange={(e) => setEventDate(e.target.value)}
+              />
+              <input
+                type="time"
+                className="w-24 p-2 border border-slate-200 rounded text-xs outline-none"
+                value={eventTime}
+                onChange={(e) => setEventTime(e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500 font-medium">
               Minutes per round:
@@ -323,6 +438,12 @@ const toggleStatus = async (id, currentStatus) => {
                 <p className="text-slate-400 text-sm mt-2 font-mono">
                   ID: {selectedEvent.id}
                 </p>
+                <p className="text-slate-400 text-sm mt-2 font-mono">
+                  Event Date & Time:{" "}
+                  {selectedEvent.scheduledAt
+                    ? selectedEvent.scheduledAt.toDate().toLocaleString()
+                    : "Not scheduled"}
+                </p>
               </div>
 
               <div className="flex gap-3">
@@ -386,84 +507,246 @@ const toggleStatus = async (id, currentStatus) => {
             </div>
 
             {/* TABLE SECTION */}
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
-                  <tr>
-                    <th className="px-6 py-4">Status</th>
-                    <th className="px-6 py-4">Name / Age</th>
-                    <th className="px-6 py-4">Gender</th>
-                    <th className="px-6 py-4">Religious / Subgroup</th>
-                    <th className="px-6 py-4">Ethnicity</th>
-                    <th className="px-6 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {attendees.map((a) => (
-                    <tr
-                      key={a.id}
-                      className="hover:bg-slate-50 transition-colors group"
-                    >
-                      <td className="px-6 py-4">
-                        <button
-                          onClick={() => toggleCheckIn(a.id, a.checkedIn)}
-                          className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] transition-all ${
-                            a.checkedIn
-                              ? "bg-green-100 text-green-700"
-                              : "bg-slate-100 text-slate-400 hover:bg-slate-200"
-                          }`}
-                        >
-                          {a.checkedIn ? (
-                            <CheckCircle size={12} />
-                          ) : (
-                            <div className="w-3 h-3 border-2 border-slate-300 rounded-full" />
-                          )}
-                          {a.checkedIn ? "CHECKED IN" : "PENDING"}
-                        </button>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-slate-900">{a.name}</p>
-                        <p className="text-xs text-slate-400">
-                          {a.age} years old
-                        </p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <select
-                          value={a.gender}
-                          onChange={(e) =>
-                            updateAttendeeGender(a.id, e.target.value)
-                          }
-                          className={`bg-transparent font-semibold focus:outline-none cursor-pointer ${
-                            a.gender === "woman"
-                              ? "text-pink-600"
-                              : "text-blue-600"
-                          }`}
-                        >
-                          <option value="man">Man</option>
-                          <option value="woman">Woman</option>
-                        </select>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="font-medium text-slate-700">
-                          {a.religiousLevel}
-                        </p>
-                        <p className="text-xs text-slate-400">{a.subGroup}</p>
-                      </td>
-                      <td className="px-6 py-4 text-slate-500">
-                        {a.ethnicity}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => deleteAttendee(a.id, a.name)}
-                          className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 transition-all"
-                        >
-                          <UserMinus size={18} />
-                        </button>
-                      </td>
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              {/* Wrap this div for horizontal scrolling */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm min-w-[1600px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
+                    <tr>
+                      <th className="px-6 py-4 sticky left-0 bg-slate-50 z-10">
+                        Status
+                      </th>
+                      <th className="px-6 py-4 sticky left-[120px] bg-slate-50 z-10">
+                        Name / Age
+                      </th>
+                      <th className="px-6 py-4">Gender</th>
+                      <th className="px-6 py-4">Religious Level</th>
+                      <th className="px-6 py-4">Subgroup</th>
+                      <th className="px-6 py-4">Ethnicity</th>
+                      <th className="px-6 py-4">Parents</th>
+                      <th className="px-6 py-4">Marital Status</th>
+                      <th className="px-6 py-4">Kohen</th>
+                      <th className="px-6 py-4">Open to Ethnicities</th>
+                      <th className="px-6 py-4">Open to Marital</th>
+                      <th className="px-6 py-4">Open to Subgroups</th>
+                      <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
+                        Actions
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {attendees.map((a) => (
+                      <tr
+                        key={a.id}
+                        className="hover:bg-slate-50 transition-colors group"
+                      >
+                        {/* Status */}
+                        <td className="px-6 py-4 sticky left-0 bg-white group-hover:bg-slate-50">
+                          <button
+                            onClick={() => toggleCheckIn(a.id, a.checkedIn)}
+                            className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
+                              a.checkedIn
+                                ? "bg-green-100 text-green-700"
+                                : "bg-slate-100 text-slate-400"
+                            }`}
+                          >
+                            {a.checkedIn ? (
+                              <CheckCircle size={12} />
+                            ) : (
+                              <div className="w-3 h-3 border-2 border-slate-300 rounded-full" />
+                            )}
+                            {a.checkedIn ? "CHECKED IN" : "PENDING"}
+                          </button>
+                        </td>
+
+                        {/* Name */}
+                        <td className="px-6 py-4 sticky left-[120px] bg-white group-hover:bg-slate-50 border-r border-slate-100">
+                          <p className="font-bold text-slate-900 truncate max-w-[150px]">
+                            {a.name}
+                          </p>
+                          <p className="text-xs text-slate-400">{a.age}y</p>
+                        </td>
+
+                        {/* Gender */}
+                        <td className="px-6 py-4">
+                          <select
+                            value={a.gender}
+                            onChange={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "gender",
+                                e.target.value
+                              )
+                            }
+                            className={`bg-transparent font-semibold outline-none ${
+                              a.gender === "woman"
+                                ? "text-pink-600"
+                                : "text-blue-600"
+                            }`}
+                          >
+                            <option value="man">Man</option>
+                            <option value="woman">Woman</option>
+                          </select>
+                        </td>
+
+                        {/* Religious Level */}
+                        <td className="px-6 py-4">
+                          <input
+                            className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none w-24"
+                            defaultValue={a.religiousLevel}
+                            onBlur={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "religiousLevel",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Subgroup */}
+                        <td className="px-6 py-4 text-slate-500">
+                          <input
+                            className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none w-32"
+                            defaultValue={a.subGroup}
+                            onBlur={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "subGroup",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Ethnicity */}
+                        <td className="px-6 py-4 text-slate-500">
+                          <input
+                            className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none w-32"
+                            defaultValue={a.ethnicity}
+                            onBlur={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "ethnicity",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Parents */}
+                        <td className="px-6 py-4 text-slate-500">
+                          <select
+                            className="bg-transparent outline-none"
+                            value={a.parents}
+                            onChange={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "parents",
+                                e.target.value
+                              )
+                            }
+                          >
+                            <option value="Both Jewish">Both Jewish</option>
+                            <option value="Mom is Jewish, Dad is not">
+                              Mom is Jewish
+                            </option>
+                            <option value="Dad is Jewish, Mom is not">
+                              Dad is Jewish
+                            </option>
+                            <option value="Neither">Neither</option>
+                          </select>
+                        </td>
+
+                        {/* Marital Status */}
+                        <td className="px-6 py-4 text-slate-500">
+                          <input
+                            className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none w-32"
+                            defaultValue={a.maritalStatus}
+                            onBlur={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "maritalStatus",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Kohen */}
+                        <td className="px-6 py-4 text-slate-500 text-center">
+                          <input
+                            type="checkbox"
+                            checked={a.isKohen === "yes" || a.isKohen === true}
+                            onChange={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "isKohen",
+                                e.target.checked ? "yes" : "no"
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Open to Ethnicities (Array Edit) */}
+                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                          <textarea
+                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                            defaultValue={a.openToEthnicities?.join(", ")}
+                            onBlur={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "openToEthnicities",
+                                e.target.value.split(",").map((s) => s.trim())
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Open to Marital (Array Edit) */}
+                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                          <textarea
+                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                            defaultValue={a.openToMaritalStatus?.join(", ")}
+                            onBlur={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "openToMaritalStatus",
+                                e.target.value.split(",").map((s) => s.trim())
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Open to Subgroups (Array Edit) */}
+                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                          <textarea
+                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                            defaultValue={a.openToSubGroups?.join(", ")}
+                            onBlur={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "openToSubGroups",
+                                e.target.value.split(",").map((s) => s.trim())
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
+                          <button
+                            onClick={() => deleteAttendee(a.id, a.name)}
+                            className="p-2 text-slate-300 hover:text-red-500 transition-all"
+                          >
+                            <UserMinus size={18} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               {attendees.length === 0 && (
                 <div className="p-20 text-center text-slate-400 italic">
                   No registrations yet.

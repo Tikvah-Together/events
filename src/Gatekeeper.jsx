@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from './firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, getDocs } from 'firebase/firestore';
+import LiveRoundView from './LiveRoundView';
 import { User, Clock, MapPin, CheckCircle2 } from 'lucide-react';
 
 export default function Gatekeeper() {
@@ -12,7 +13,7 @@ export default function Gatekeeper() {
 
   // 1. Fetch Active Events
   useEffect(() => {
-    const q = query(collection(db, "events"), where("active", "==", true));
+    const q = query(collection(db, "events")); // Show all events so iPads can connect
     const unsubscribe = onSnapshot(q, (snap) => {
       setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });

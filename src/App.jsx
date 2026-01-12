@@ -30,7 +30,7 @@ function Home() {
         </Link>
 
         {/* iPad / Gatekeeper Entry */}
-        <Link to="/gate" className="group flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-orange-500 hover:shadow-lg transition-all text-center">
+        <Link to="/event" className="group flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-orange-500 hover:shadow-lg transition-all text-center">
           <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-full flex items-center justify-center mb-4 group-hover:bg-orange-500 group-hover:text-white transition-colors">
             <Tablet size={24} />
           </div>
@@ -63,7 +63,7 @@ function App() {
             </Link>
             <div className="hidden md:flex space-x-8 text-xs uppercase tracking-widest font-bold text-slate-400">
               <Link to="/register" className="hover:text-blue-900 transition-colors">Register</Link>
-              <Link to="/gate" className="hover:text-orange-600 transition-colors">iPad Login</Link>
+              <Link to="/event" className="hover:text-orange-600 transition-colors">iPad Login</Link>
               <Link to="/admin" className="hover:text-blue-900 transition-colors">Admin</Link>
             </div>
           </div>
@@ -76,7 +76,7 @@ function App() {
             
             {/* GATEKEEPER: This is the iPad's main entry point */}
             {/* We keep it under AdminGuard so only staff can set up the iPads initially */}
-            <Route path="/gate" element={<AdminGuard><Gatekeeper /></AdminGuard>} />
+            <Route path="/event" element={<AdminGuard><Gatekeeper /></AdminGuard>} />
             
             {/* LIVE: This is where the iPads go after they login via Gatekeeper */}
             <Route path="/live" element={<AdminGuard><EventController /></AdminGuard>} />
