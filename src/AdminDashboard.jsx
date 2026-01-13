@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { db } from "./firebase";
 import {
   collection,
@@ -15,7 +15,6 @@ import {
 import {
   Plus,
   Trash2,
-  Users,
   Calendar,
   Play,
   Square,
@@ -295,9 +294,13 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex flex-col md:flex-row h-screen bg-slate-50 overflow-hidden">
       {/* SIDEBAR: Event List */}
-      <div className="w-80 bg-white border-r border-slate-200 p-6 flex flex-col">
+      <div
+        className={`${
+          selectedEvent ? "hidden md:flex" : "flex"
+        } w-full md:w-80 bg-white border-r border-slate-200 p-6 flex-col h-full`}
+      >
         <h2 className="text-xl font-bold text-blue-900 mb-6 tracking-tight">
           Events Management
         </h2>
@@ -332,7 +335,7 @@ export default function AdminDashboard() {
 
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500 font-medium">
-              Minutes per round:
+              Minute(s) per round:
             </span>
             <input
               type="number"
@@ -372,7 +375,7 @@ export default function AdminDashboard() {
                 )}
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                {ev.roundTime} minutes per round
+                {ev.roundTime} minute(s) per round
               </p>
             </div>
           ))}
@@ -380,14 +383,20 @@ export default function AdminDashboard() {
       </div>
 
       {/* MAIN CONTENT: Event Details */}
-      <div className="flex-1 p-10 overflow-y-auto">
+      <div className="flex-1 p-4 md:p-10 overflow-auto">
         {selectedEvent ? (
           <div className="max-w-4xl mx-auto">
+            <button
+              onClick={() => setSelectedEvent(null)}
+              className="md:hidden mb-4 text-blue-600 font-bold flex items-center gap-2"
+            >
+              ← Back to Events
+            </button>
             {/* HEADER SECTION */}
-            <div className="flex justify-between items-start mb-10 pb-6 border-b border-slate-200">
+            <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-6 mb-10 pb-6 border-b border-slate-200">
               <div>
-                <div className="flex items-center gap-3">
-                  <h1 className="text-4xl font-bold text-slate-900">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-2xl md:text-4xl font-bold text-slate-900">
                     {selectedEvent.name}
                   </h1>
                   <span
@@ -400,7 +409,7 @@ export default function AdminDashboard() {
                     {selectedEvent.active ? "LIVE" : "DRAFT"}
                   </span>
                 </div>
-                <div className="mt-3 flex items-center gap-2 group">
+                <div className="mt-3 flex flex-wrap md:flex-nowrap items-center gap-2 w-full md:w-auto group">
                   <div
                     onClick={() => copyRegistrationLink(selectedEvent.id)}
                     className="flex items-center gap-2 px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-100 cursor-pointer hover:bg-blue-100 transition-all shadow-sm"
@@ -408,7 +417,7 @@ export default function AdminDashboard() {
                     <span className="text-[10px] font-bold uppercase tracking-tight">
                       Registration Link:
                     </span>
-                    <code className="text-xs font-mono">
+                    <code className="text-[10px] md:text-xs font-mono break-all md:break-normal">
                       {window.location.origin}/register?eventId=
                       {selectedEvent.id}
                     </code>
@@ -433,7 +442,7 @@ export default function AdminDashboard() {
                   </span>
                 </div>
                 <p className="text-sm text-slate-500 mt-1">
-                  Round Time: {selectedEvent.roundTime} minutes
+                  Round Time: {selectedEvent.roundTime} minute(s)
                 </p>
                 <p className="text-slate-400 text-sm mt-2 font-mono">
                   ID: {selectedEvent.id}
@@ -446,7 +455,7 @@ export default function AdminDashboard() {
                 </p>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
                 <button
                   onClick={() =>
                     toggleStatus(selectedEvent.id, selectedEvent.active)
@@ -479,7 +488,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* STATS CARDS */}
-            <div className="grid grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
               <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm text-center">
                 <p className="text-3xl font-bold text-slate-800">
                   {attendees.length}
@@ -527,7 +536,7 @@ export default function AdminDashboard() {
                       <th className="px-6 py-4">Marital Status</th>
                       <th className="px-6 py-4">Kohen</th>
                       <th className="px-6 py-4">Open to Ethnicities</th>
-                      <th className="px-6 py-4">Open to Marital</th>
+                      <th className="px-6 py-4">Open to Marry</th>
                       <th className="px-6 py-4">Open to Subgroups</th>
                       <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
                         Actions
@@ -590,18 +599,29 @@ export default function AdminDashboard() {
                         </td>
 
                         {/* Religious Level */}
-                        <td className="px-6 py-4">
-                          <input
-                            className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none w-24"
-                            defaultValue={a.religiousLevel}
-                            onBlur={(e) =>
+                        <td className="px-6 py-4 text-slate-500">
+                          <select
+                            className="bg-transparent outline-none"
+                            value={a.religiousLevel}
+                            onChange={(e) =>
                               updateAttendeeField(
                                 a.id,
                                 "religiousLevel",
                                 e.target.value
                               )
                             }
-                          />
+                          >
+                            <option value="Orthodox">Orthodox</option>
+                            <option value="Modern">Modern</option>
+                            <option value="Traditional">Traditional</option>
+                            <option value="Conservative">Conservative</option>
+                            <option value="Reform">Reform</option>
+                            <option value="Reconstuctionist">
+                              Reconstuctionist
+                            </option>
+                            <option value="Just Jewish">Just Jewish</option>
+                            <option value="Spiritual">Spiritual</option>
+                          </select>
                         </td>
 
                         {/* Subgroup */}
@@ -621,17 +641,31 @@ export default function AdminDashboard() {
 
                         {/* Ethnicity */}
                         <td className="px-6 py-4 text-slate-500">
-                          <input
-                            className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none w-32"
-                            defaultValue={a.ethnicity}
-                            onBlur={(e) =>
+                          <select
+                            className="bg-transparent outline-none"
+                            value={a.ethnicity}
+                            onChange={(e) =>
                               updateAttendeeField(
                                 a.id,
                                 "ethnicity",
                                 e.target.value
                               )
                             }
-                          />
+                          >
+                            <option value="Ashkenazi">Ashkenazi</option>
+                            <option value="Sephardi (Syrian)">
+                              Sephardi (Syrian)
+                            </option>
+                            <option value="Sephardi (Persian)">
+                              Sephardi (Persian)
+                            </option>
+                            <option value="Sephardi (Moroccan)">
+                              Sephardi (Moroccan)
+                            </option>
+                            <option value="Sephardi (Other)">
+                              Sephardi (Other)
+                            </option>
+                          </select>
                         </td>
 
                         {/* Parents */}
@@ -660,17 +694,30 @@ export default function AdminDashboard() {
 
                         {/* Marital Status */}
                         <td className="px-6 py-4 text-slate-500">
-                          <input
-                            className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none w-32"
-                            defaultValue={a.maritalStatus}
-                            onBlur={(e) =>
+                          <select
+                            className="bg-transparent outline-none"
+                            value={a.maritalStatus}
+                            onChange={(e) =>
                               updateAttendeeField(
                                 a.id,
                                 "maritalStatus",
                                 e.target.value
                               )
                             }
-                          />
+                          >
+                            <option value="Single">Single</option>
+                            <option value="Divorced">Divorced</option>
+                            <option value="Widowed">Widowed</option>
+                            <option value="Single with kids">
+                              Single with kids
+                            </option>
+                            <option value="Divorced with kids">
+                              Divorced with kids
+                            </option>
+                            <option value="Widowed with kids">
+                              Widowed with kids
+                            </option>
+                          </select>
                         </td>
 
                         {/* Kohen */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { db } from './firebase';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { MapPin, PartyPopper, Maximize, Coffee } from 'lucide-react';
@@ -23,8 +23,8 @@ export default function LiveRoundView({ event, user, attendees }) {
     if (me.maxAge && partner.age > me.maxAge) return false;
 
     // B. Kohen Logic
-    // If user is a Kohen and partner is divorced, return false
-    if (me.isKohen && partner.maritalStatus === 'Divorced') return false;
+    // If user is a male Kohen and partner is female divorced, return false
+    if (me.isKohen && me.gender === 'man' && partner.gender === 'woman' && partner.maritalStatus === 'Divorced') return false;
 
     // C. Ethnicity Filter
     // If I have preferences set, check if partner's ethnicity is in my allowed list
@@ -192,26 +192,26 @@ if (isEventOver) {
 
       {/* Re-include the Email Modal here just in case they haven't entered it by the last round */}
       {showEmailModal && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-6 z-50">
-          <div className="bg-white text-slate-900 p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl">
-            <h2 className="text-3xl font-bold mb-4">Email Address</h2>
-            <p className="text-slate-500 mb-8 text-lg">We need this to send your matches!</p>
-            <input 
-              type="email" 
-              className="w-full p-5 border-2 border-slate-200 rounded-2xl mb-8 text-2xl focus:border-blue-500 outline-none"
-              placeholder="name@email.com"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-            />
-            <button 
-              onClick={() => submitToFirebase(pendingSelection)}
-              className="w-full py-6 bg-blue-600 text-white rounded-2xl text-2xl font-black"
-            >
-              Submit & Finish
-            </button>
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50">
+            <div className="bg-white text-slate-900 p-8 rounded-3xl w-full max-w-md">
+              <h2 className="text-2xl font-bold mb-2">One last thing!</h2>
+              <p className="text-slate-500 mb-6">Enter your email to receive your match results.</p>
+              <input 
+                type="email" 
+                className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg"
+                placeholder="email@example.com"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+              />
+              <button 
+                onClick={() => submitToFirebase(pendingSelection)}
+                className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold"
+              >
+                Save & Submit Selection
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
     </div>
   );
 }

@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { db } from './firebase';
-import { collection, query, where, onSnapshot, doc, updateDoc, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import LiveRoundView from './LiveRoundView';
-import { User, Clock, MapPin, CheckCircle2 } from 'lucide-react';
+import { Clock } from 'lucide-react';
 
 export default function Gatekeeper() {
   const [events, setEvents] = useState([]);
