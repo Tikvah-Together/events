@@ -1,39 +1,72 @@
-import { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, addDoc, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect } from "react";
+import { db } from "./firebase";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  where,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import { useSearchParams } from "react-router-dom";
 
-const RELIGIOUS_SUBGROUPS = ['Chabad', 'Chasidish', 'Haredi', 'Yeshivish', 'Modern Yeshivish', 'Modern Orthodox Machmir', 'Heimish', 'Out of the box'];
-const ETHNICITIES = ['Ashkenazi', 'Sephardi (Syrian)', 'Sephardi (Persian)', 'Sephardi (Moroccan)', 'Sephardi (Other)'];
-const MARITAL_STATUSES = ['Single', 'Single with kids', 'Divorced', 'Divorced with kids', 'Widowed', 'Widowed with kids'];
+// const RELIGIOUS_SUBGROUPS = [
+//   "Chabad",
+//   "Chasidish",
+//   "Haredi",
+//   "Yeshivish",
+//   "Modern Yeshivish",
+//   "Modern Orthodox Machmir",
+//   "Heimish",
+//   "Out of the box",
+// ];
+const ETHNICITIES = [
+  "Syrian",
+  "Egyptian",
+  "Lebanese",
+  "Other Sephardic",
+  "Ashkenazi",
+  "Other",
+];
+const MARITAL_STATUSES = ["Single", "Divorced", "Widowed"];
 
 export default function RegistrationForm() {
   const [searchParams] = useSearchParams();
-  const urlEventId = searchParams.get('eventId'); // Get ?eventId=XYZ from URL
+  const urlEventId = searchParams.get("eventId"); // Get ?eventId=XYZ from URL
 
   const [events, setEvents] = useState([]);
   const [selectedEventName, setSelectedEventName] = useState(""); // To show name if ID is hidden
   const [loading, setLoading] = useState(false);
-  
+
   const [formData, setFormData] = useState({
-    eventId: urlEventId || '',
-    name: '',
-    gender: '',
-    targetGender: '',
-    birthDate: '',
+    eventId: urlEventId || "",
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    gender: "",
+    // targetGender: "",
+    birthDate: "",
     ageRange: { min: 18, max: 40 },
-    parents: '',
-    religiousLevel: '',
-    subGroup: '',
-    openToSubGroups: [],
-    ethnicity: '',
+    // parents: "",
+    // religiousLevel: "",
+    // subGroup: "",
+    // openToSubGroups: [],
+    ethnicity: "",
+    otherSephardic: "",
     openToEthnicities: [],
-    isKohen: 'no',
-    maritalStatus: '',
-    openToMaritalStatus: []
+    isKohen: "no",
+    isShomerShabbat: "yes",
+    isShomerKashrut: "yes",
+    wantsCoveredHead: "yes",
+    hairCovering: "N/A",
+    dressStyle: "N/A",
+    maritalStatus: "",
+    openToMaritalStatus: [],
   });
 
-// Fetch events or specific event name
+  // Fetch events or specific event name
   useEffect(() => {
     const fetchEventData = async () => {
       if (urlEventId) {
@@ -47,7 +80,7 @@ export default function RegistrationForm() {
         // Otherwise, fetch all events for the dropdown. They should be inactive.
         const q = query(collection(db, "events"), where("active", "==", false));
         const snap = await getDocs(q);
-        setEvents(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        setEvents(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
       }
     };
     fetchEventData();
@@ -70,7 +103,7 @@ export default function RegistrationForm() {
     setFormData({ ...formData, [field]: current });
   };
 
-const handleSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.eventId) return alert("Please select an event");
     setLoading(true);
@@ -80,7 +113,7 @@ const handleSubmit = async (e) => {
         ...formData,
         age: calculateAge(formData.birthDate),
         checkedIn: false,
-        timestamp: new Date()
+        timestamp: new Date(),
       });
       alert("Registration successful!");
       window.location.reload();
@@ -93,89 +126,502 @@ const handleSubmit = async (e) => {
 
   return (
     <div className="min-h-screen bg-white py-12 px-4">
-    <div className="max-w-xl mx-auto">
-      <h2 className="text-3xl font-bold text-slate-800 mb-8 text-center">Event Registration</h2>
+      <div className="max-w-xl mx-auto">
+        <h2 className="text-3xl font-bold text-slate-800 mb-8 text-center">
+          Event Registration
+        </h2>
 
-      {/* Conditional UI: Show name if ID is in URL, otherwise show dropdown */}
+        {/* Conditional UI: Show name if ID is in URL, otherwise show dropdown */}
         {urlEventId ? (
-          <p className="text-center text-blue-600 font-medium mb-8">Registering for: {selectedEventName || "Loading event..."}</p>
+          <p className="text-center text-blue-600 font-medium mb-8">
+            Registering for: {selectedEventName || "Loading event..."}
+          </p>
         ) : (
           <div className="mb-8">
-            <label className="block font-semibold mb-2 text-center text-slate-600">Select Event</label>
-            <select 
+            <label className="block font-semibold mb-2 text-center text-slate-600">
+              Select Event
+            </label>
+            <select
               required
               className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
               value={formData.eventId}
-              onChange={(e) => setFormData({...formData, eventId: e.target.value})}
+              onChange={(e) =>
+                setFormData({ ...formData, eventId: e.target.value })
+              }
             >
               <option value="">-- Choose an Event --</option>
-              {events.map(ev => (
-                <option key={ev.id} value={ev.id}>{ev.name}</option>
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.name}
+                </option>
               ))}
             </select>
           </div>
         )}
-      
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Basic Info */}
-        <div className="flex gap-4">
-          <div className="flex-1">
-            <label className="block text-sm font-medium mb-1">Your Name</label>
-            <input 
-            type="text" placeholder="What's your name?" required
-            className="p-3 border rounded-lg"
-            onChange={(e) => setFormData({...formData, name: e.target.value})}
-          />
-          </div>
-          <div className="flex-1">
-            <label className="block text-sm font-medium mb-1">Your Birth Date</label>
-            <input 
-            type="date" required
-            className="p-3 border rounded-lg text-gray-500"
-            onChange={(e) => setFormData({...formData, birthDate: e.target.value})}
-          />
-          </div>
-        </div>
 
-        {/* Gender Choice */}
-        <div className="flex gap-4">
-          <div className="flex-1">
-            <label className="block text-sm font-medium mb-1">You're a...</label>
-            <select required className="w-full p-3 border rounded-lg" onChange={(e) => setFormData({...formData, gender: e.target.value})}>
-              <option value="">Select</option>
-              <option value="man">Man</option>
-              <option value="woman">Woman</option>
-            </select>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Name info */}
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">
+                First Name
+              </label>
+              <input
+                type="text"
+                placeholder="First name"
+                required
+                className="p-3 border rounded-lg"
+                onChange={(e) =>
+                  setFormData({ ...formData, firstName: e.target.value })
+                }
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">
+                Last Name
+              </label>
+              <input
+                type="text"
+                placeholder="Last name"
+                required
+                className="p-3 border rounded-lg"
+                onChange={(e) =>
+                  setFormData({ ...formData, lastName: e.target.value })
+                }
+              />
+            </div>
           </div>
-          <div className="flex-1">
+
+          {/* Birth Date Info */}
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">
+                Your Birth Date
+              </label>
+              <input
+                type="date"
+                required
+                className="p-3 border rounded-lg text-gray-500"
+                onChange={(e) =>
+                  setFormData({ ...formData, birthDate: e.target.value })
+                }
+              />
+            </div>
+          </div>
+
+          {/* Gender Choice */}
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">
+                You're a...
+              </label>
+              <select
+                required
+                className="w-full p-3 border rounded-lg"
+                onChange={(e) =>
+                  setFormData({ ...formData, gender: e.target.value })
+                }
+              >
+                <option value="">Select</option>
+                <option value="man">Man</option>
+                <option value="woman">Woman</option>
+              </select>
+            </div>
+            {/* <div className="flex-1">
             <label className="block text-sm font-medium mb-1">Looking for a...</label>
             <select required className="w-full p-3 border rounded-lg" onChange={(e) => setFormData({...formData, targetGender: e.target.value})}>
               <option value="">Select</option>
               <option value="man">Man</option>
               <option value="woman">Woman</option>
             </select>
+          </div> */}
           </div>
-        </div>
 
-        {/* Target Age Range Choice */}
-        <section>
-          <label className="block font-semibold mb-2">Preferred Age Range</label>
+          {/* Target Age Range Choice */}
+          <section>
+            <label className="block font-semibold mb-2">
+              Preferred Age Range
+            </label>
+            <div className="flex gap-4">
+              <input
+                type="number"
+                min="18"
+                max="100"
+                placeholder="Min Age"
+                required
+                className="w-full p-3 border rounded-lg"
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    ageRange: {
+                      ...formData.ageRange,
+                      min: parseInt(e.target.value),
+                    },
+                  })
+                }
+              />
+              <input
+                type="number"
+                min="18"
+                max="100"
+                placeholder="Max Age"
+                required
+                className="w-full p-3 border rounded-lg"
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    ageRange: {
+                      ...formData.ageRange,
+                      max: parseInt(e.target.value),
+                    },
+                  })
+                }
+              />
+            </div>
+          </section>
+
+          {/* Phone and email */}
           <div className="flex gap-4">
-            <input 
-              type="number" min="18" max="100" placeholder="Min Age" required
-              className="w-full p-3 border rounded-lg"
-              onChange={(e) => setFormData({...formData, ageRange: {...formData.ageRange, min: parseInt(e.target.value)}})}
-            />
-            <input 
-              type="number" min="18" max="100" placeholder="Max Age" required
-              className="w-full p-3 border rounded-lg"
-              onChange={(e) => setFormData({...formData, ageRange: {...formData.ageRange, max: parseInt(e.target.value)}})}
-            />
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">
+                Phone Number
+              </label>
+              <input
+                type="tel"
+                placeholder="Phone number"
+                required
+                className="p-3 border rounded-lg"
+                onChange={(e) =>
+                  setFormData({ ...formData, phone: e.target.value })
+                }
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">
+                Email Address
+              </label>
+              <input
+                type="email"
+                placeholder="Email address"
+                required
+                className="p-3 border rounded-lg"
+                onChange={(e) =>
+                  setFormData({ ...formData, email: e.target.value })
+                }
+              />
+            </div>
           </div>
-        </section>
 
-        {/* Parents Background */}
-        <section>
+          {/* Ethnicity */}
+          <section>
+            <label className="block font-semibold mb-2">Ethnicity</label>
+            <select
+              required
+              className="w-full p-3 border rounded-lg mb-2"
+              onChange={(e) =>
+                setFormData({ ...formData, ethnicity: e.target.value })
+              }
+            >
+              <option value="">Select yours...</option>
+              {ETHNICITIES.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <label className="block text-sm text-gray-600 mb-2 italic">
+              I am open to date someone who is:
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+              {ETHNICITIES.map((opt) => (
+                <label key={opt} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() =>
+                      handleCheckbox(
+                        formData.openToEthnicities,
+                        opt,
+                        "openToEthnicities"
+                      )
+                    }
+                  />
+                  {opt}
+                </label>
+              ))}
+            </div>
+          </section>
+
+          {/* Specify for Other Sephardic option */}
+          {formData.ethnicity === "Other Sephardic" && (
+            <section>
+              <label className="block font-semibold mb-2">
+                Please specify your Sephardic background:
+              </label>
+              <input
+                type="text"
+                placeholder="e.g., Moroccan, Persian, etc."
+                className="w-full p-3 border rounded-lg mb-2"
+                onChange={(e) =>
+                  setFormData({ ...formData, otherSephardic: e.target.value })
+                }
+              />
+            </section>
+          )}
+
+          {/* Marital Status */}
+          <section>
+            <label className="block font-semibold mb-2">Marital Status</label>
+            <select
+              required
+              className="w-full p-3 border rounded-lg mb-2"
+              onChange={(e) =>
+                setFormData({ ...formData, maritalStatus: e.target.value })
+              }
+            >
+              <option value="">Select yours...</option>
+              {MARITAL_STATUSES.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <label className="block text-sm text-gray-600 mb-2 italic">
+              I am open to date someone who is:
+            </label>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              {MARITAL_STATUSES.map((opt) => (
+                <label key={opt} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    onChange={() =>
+                      handleCheckbox(
+                        formData.openToMaritalStatus,
+                        opt,
+                        "openToMaritalStatus"
+                      )
+                    }
+                  />
+                  {opt}
+                </label>
+              ))}
+            </div>
+          </section>
+
+          {/* Religious Lifestyle */}
+          <section>
+              <label className="block font-semibold mb-2">
+                What is your Shabbat level?
+              </label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="isShomerShabbat"
+                    value="yes"
+                    defaultChecked
+                    onChange={() =>
+                      setFormData({ ...formData, isShomerShabbat: "yes" })
+                    }
+                  />{" "}
+                  I keep Shabbat
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="isShomerShabbat"
+                    value="no"
+                    onChange={() => setFormData({ ...formData, isShomerShabbat: "no" })}
+                  />{" "}
+                  Not Shomer Shabbat / Still growing
+                </label>
+              </div>
+            </section>
+
+            
+          {/* Religious Lifestyle 2 */}
+          <section>
+              <label className="block font-semibold mb-2">
+                What is your Kashrut level?
+              </label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="isShomerKashrut"
+                    value="yes"
+                    defaultChecked
+                    onChange={() =>
+                      setFormData({ ...formData, isShomerKashrut: "yes" })
+                    }
+                  />{" "}
+                  I keep Kosher
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="isShomerKashrut"
+                    value="no"
+                    onChange={() => setFormData({ ...formData, isShomerKashrut: "no" })}
+                  />{" "}
+                  Not strictly kosher / Still growing
+                </label>
+              </div>
+            </section>
+
+          {/* Dress style, women only */}
+          {formData.gender === "woman" && (
+            <section>
+              <label className="block font-semibold mb-2">
+                What is your preferred dress style?
+              </label>
+              <div className="flex gap-4 mb-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="dressStyle"
+                    value="skirtsOnly"
+                    defaultChecked
+                    onChange={() =>
+                      setFormData({ ...formData, dressStyle: "skirtsOnly" })
+                    }
+                  />{" "}
+                  Skirts only
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="dressStyle"
+                    value="skirtsPants"
+                    onChange={() => setFormData({ ...formData, dressStyle: "skirtsPants" })}
+                  />{" "}
+                  Skirts + pants
+                </label>
+              </div>
+            </section>
+          )}
+
+          {/* Hair covering, women only */}
+          {formData.gender === "woman" && (
+            <section>
+              <label className="block font-semibold mb-2">
+                Hair covering after marriage?
+              </label>
+              <div className="flex gap-4 mb-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="hairCovering"
+                    value="willCoverHair"
+                    defaultChecked
+                    onChange={() =>
+                      setFormData({ ...formData, hairCovering: "willCoverHair" })
+                    }
+                  />{" "}
+                  Will cover hair
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="hairCovering"
+                    value="openFlexible"
+                    onChange={() => setFormData({ ...formData, hairCovering: "openFlexible" })}
+                  />{" "}
+                  Open / flexible
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="hairCovering"
+                    value="notPlanning"
+                    onChange={() => setFormData({ ...formData, hairCovering: "notPlanning" })}
+                  />{" "}
+                  Not planning to cover hair
+                </label>
+              </div>
+            </section>
+          )}
+
+          {/* Kohen, only for men */}
+          {formData.gender === "man" && (
+            <section>
+              <label className="block font-semibold mb-2">
+                Are you a Kohen?
+              </label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="kohen"
+                    value="yes"
+                    onChange={() =>
+                      setFormData({ ...formData, isKohen: "yes" })
+                    }
+                  />{" "}
+                  Yes
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="kohen"
+                    value="no"
+                    defaultChecked
+                    onChange={() => setFormData({ ...formData, isKohen: "no" })}
+                  />{" "}
+                  No
+                </label>
+              </div>
+            </section>
+          )}
+
+          {/* Cover hair, only for men */}
+          {formData.gender === "man" && (
+            <section>
+              <label className="block font-semibold mb-2">
+                Do you prefer a woman who will cover her hair?
+              </label>
+              <div className="flex gap-4 mb-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="coverHead"
+                    value="yes"
+                    defaultChecked
+                    onChange={() =>
+                      setFormData({ ...formData, wantsCoveredHead: "yes" })
+                    }
+                  />{" "}
+                  Yes
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="coverHead"
+                    value="no"
+                    onChange={() =>
+                      setFormData({ ...formData, wantsCoveredHead: "no" })
+                    }
+                  />{" "}
+                  No
+                </label>
+              </div>
+            </section>
+          )}
+
+          <button
+            disabled={loading}
+            type="submit"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-colors shadow-lg"
+          >
+            {loading ? "Saving..." : "Register for Event"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+          {/* Parents Background, not needed for now */}
+          {/* <section>
           <label className="block font-semibold mb-2">Your parents are:</label>
           <select required className="w-full p-3 border rounded-lg" onChange={(e) => setFormData({...formData, parents: e.target.value})}>
             <option value="">Select</option>
@@ -184,91 +630,78 @@ const handleSubmit = async (e) => {
             <option>Dad is Jewish, Mom is not</option>
             <option>Neither</option>
           </select>
-        </section>
+        </section> */}
 
-        {/* Religious Level */}
-        <section>
-          <label className="block font-semibold mb-2">Which best describes you?</label>
-          <select required className="w-full p-3 border rounded-lg" onChange={(e) => setFormData({...formData, religiousLevel: e.target.value})}>
-            <option value="">Select</option>
-            {['Orthodox', 'Modern', 'Traditional', 'Conservative', 'Reform', 'Reconstructionist', 'Just Jewish', 'Spiritual'].map(opt => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
-        </section>
+          {/* Religious Level */}
+          {/* <section>
+            <label className="block font-semibold mb-2">
+              Which best describes you?
+            </label>
+            <select
+              required
+              className="w-full p-3 border rounded-lg"
+              onChange={(e) =>
+                setFormData({ ...formData, religiousLevel: e.target.value })
+              }
+            >
+              <option value="">Select</option>
+              {[
+                "Orthodox",
+                "Modern",
+                "Traditional",
+                "Conservative",
+                "Reform",
+                "Reconstructionist",
+                "Just Jewish",
+                "Spiritual",
+              ].map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </section> */}
 
-        {/* Religious Subgroup (Multi) */}
-        <section>
-          <label className="block font-semibold mb-2">Community / Hashkafa</label>
-          <select required className="w-full p-3 border rounded-lg mb-2" onChange={(e) => setFormData({...formData, subGroup: e.target.value})}>
-            <option value="">Select yours...</option>
-            {RELIGIOUS_SUBGROUPS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-          <label className="block text-sm text-gray-600 mb-2 italic">I am open to date someone who is:</label>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            {RELIGIOUS_SUBGROUPS.map(opt => (
-              <label key={opt} className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" onChange={() => handleCheckbox(formData.openToSubGroups, opt, 'openToSubGroups')} />
-                {opt}
-              </label>
-            ))}
-          </div>
-        </section>
-
-        {/* Ethnicity */}
-        <section>
-          <label className="block font-semibold mb-2">Ethnicity</label>
-          <select required className="w-full p-3 border rounded-lg mb-2" onChange={(e) => setFormData({...formData, ethnicity: e.target.value})}>
-            <option value="">Select yours...</option>
-            {ETHNICITIES.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-          <label className="block text-sm text-gray-600 mb-2 italic">I am open to date someone who is:</label>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-            {ETHNICITIES.map(opt => (
-              <label key={opt} className="flex items-center gap-2">
-                <input type="checkbox" onChange={() => handleCheckbox(formData.openToEthnicities, opt, 'openToEthnicities')} />
-                {opt}
-              </label>
-            ))}
-          </div>
-        </section>
-
-        {/* Marital Status */}
-        <section>
-          <label className="block font-semibold mb-2">Marital Status</label>
-          <select required className="w-full p-3 border rounded-lg mb-2" onChange={(e) => setFormData({...formData, maritalStatus: e.target.value})}>
-            <option value="">Select yours...</option>
-            {MARITAL_STATUSES.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-          <label className="block text-sm text-gray-600 mb-2 italic">I am open to date someone who is:</label>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            {MARITAL_STATUSES.map(opt => (
-              <label key={opt} className="flex items-center gap-2">
-                <input type="checkbox" onChange={() => handleCheckbox(formData.openToMaritalStatus, opt, 'openToMaritalStatus')} />
-                {opt}
-              </label>
-            ))}
-          </div>
-        </section>
-
-        {/* Kohen */}
-        <section>
-          <label className="block font-semibold mb-2">Are you a Kohen?</label>
-          <div className="flex gap-4">
-            <label className="flex items-center gap-2"><input type="radio" name="kohen" value="yes" onChange={() => setFormData({...formData, isKohen: 'yes'})}/> Yes</label>
-            <label className="flex items-center gap-2"><input type="radio" name="kohen" value="no" defaultChecked onChange={() => setFormData({...formData, isKohen: 'no'})}/> No</label>
-          </div>
-        </section>
-
-        <button 
-          disabled={loading}
-          type="submit" 
-          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-colors shadow-lg"
-        >
-          {loading ? "Saving..." : "Register for Event"}
-        </button>
-      </form>
-    </div>
-    </div>
-  );
-}
+          {/* Religious Subgroup (Multi) */}
+          {/* <section>
+            <label className="block font-semibold mb-2">
+              Community / Hashkafa
+            </label>
+            <select
+              required
+              className="w-full p-3 border rounded-lg mb-2"
+              onChange={(e) =>
+                setFormData({ ...formData, subGroup: e.target.value })
+              }
+            >
+              <option value="">Select yours...</option>
+              {RELIGIOUS_SUBGROUPS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            <label className="block text-sm text-gray-600 mb-2 italic">
+              I am open to date someone who is:
+            </label>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              {RELIGIOUS_SUBGROUPS.map((opt) => (
+                <label
+                  key={opt}
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    onChange={() =>
+                      handleCheckbox(
+                        formData.openToSubGroups,
+                        opt,
+                        "openToSubGroups"
+                      )
+                    }
+                  />
+                  {opt}
+                </label>
+              ))}
+            </div>
+          </section> */}

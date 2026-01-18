@@ -16,32 +16,36 @@ export default function LiveRoundView({ event, user, attendees }) {
   // This logic runs every time the partner changes
 // --- 1. COMPATIBILITY FILTER ---
   const checkCompatibility = (me, partner) => {// TODO see if parents should be considered
-    if (!partner) return false;
+    // if (!partner) return false;
 
-    // A. Age Filter (Simple min/max check)
-    if (me.minAge && partner.age < me.minAge) return false;
-    if (me.maxAge && partner.age > me.maxAge) return false;
+    // // A. Age Filter (Simple min/max check)
+    // if (me.ageRange.max > partner.age && partner.age > me.ageRange.min) return false;
+    // console.log("Age compatibility passed.");
 
-    // B. Kohen Logic
-    // If user is a male Kohen and partner is female divorced, return false
-    if (me.isKohen && me.gender === 'man' && partner.gender === 'woman' && partner.maritalStatus === 'Divorced') return false;
+    // // B. Kohen Logic
+    // // If user is a male Kohen and partner is female divorced, return false
+    // if (me.isKohen && me.gender === 'man' && partner.gender === 'woman' && partner.maritalStatus === 'Divorced') return false;
+    // console.log("Kohen compatibility passed.");
 
-    // C. Ethnicity Filter
-    // If I have preferences set, check if partner's ethnicity is in my allowed list
-    if (me.openToEthnicities && me.openToEthnicities.length > 0) {
-      if (!me.openToEthnicities.includes(partner.ethnicity)) return false;
-    }
+    // // C. Ethnicity Filter
+    // // If I have preferences set, check if partner's ethnicity is in my allowed list
+    // if (me.openToEthnicities && me.openToEthnicities.length > 0) {
+    //   if (!me.openToEthnicities.includes(partner.ethnicity)) return false;
+    // }
+    // console.log("Ethnicity compatibility passed.");
 
-    // D. Marital Status Filter
-    // Checks if partner's status (Single, Divorced, Widowed) is in my allowed list
-    if (me.openToMaritalStatus && me.openToMaritalStatus.length > 0) {
-      if (!me.openToMaritalStatus.includes(partner.maritalStatus)) return false;
-    }
+    // // D. Marital Status Filter
+    // // Checks if partner's status (Single, Divorced, Widowed) is in my allowed list
+    // if (me.openToMaritalStatus && me.openToMaritalStatus.length > 0) {
+    //   if (!me.openToMaritalStatus.includes(partner.maritalStatus)) return false;
+    // }
+    // console.log("Marital status compatibility passed.");
 
-    // E. Subgroup Filter (Ashkenazi, Sephardic, Lubavitch, etc.)
-    if (me.openToSubGroups && me.openToSubGroups.length > 0) {
-      if (!me.openToSubGroups.includes(partner.subgroup)) return false;
-    }
+    // // E. Subgroup Filter (Ashkenazi, Sephardic, Lubavitch, etc.)
+    // if (me.openToSubGroups && me.openToSubGroups.length > 0) {
+    //   if (!me.openToSubGroups.includes(partner.subgroup)) return false;
+    // }
+    // console.log("Subgroup compatibility passed.");
 
     // If all checks pass, it's a valid date
     return true;

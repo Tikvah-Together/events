@@ -529,15 +529,21 @@ export default function AdminDashboard() {
                         Name / Age
                       </th>
                       <th className="px-6 py-4">Gender</th>
-                      <th className="px-6 py-4">Religious Level</th>
-                      <th className="px-6 py-4">Subgroup</th>
                       <th className="px-6 py-4">Ethnicity</th>
-                      <th className="px-6 py-4">Parents</th>
+                      <th className="px-6 py-4">
+                        Other Sephardic (if applicable)
+                      </th>
                       <th className="px-6 py-4">Marital Status</th>
                       <th className="px-6 py-4">Kohen</th>
                       <th className="px-6 py-4">Open to Ethnicities</th>
                       <th className="px-6 py-4">Open to Marry</th>
-                      <th className="px-6 py-4">Open to Subgroups</th>
+                      <th className="px-6 py-4">Shomer Shabbat</th>
+                      <th className="px-6 py-4">Shomer Kashrut</th>
+                      <th className="px-6 py-4">Wants covered head (Male)</th>
+                      <th className="px-6 py-4">
+                        Wants to cover head (Female)
+                      </th>
+                      <th className="px-6 py-4">Dress Style (Female)</th>
                       <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
                         Actions
                       </th>
@@ -571,7 +577,7 @@ export default function AdminDashboard() {
                         {/* Name */}
                         <td className="px-6 py-4 sticky left-[120px] bg-white group-hover:bg-slate-50 border-r border-slate-100">
                           <p className="font-bold text-slate-900 truncate max-w-[150px]">
-                            {a.name}
+                            {a.firstName} {a.lastName}
                           </p>
                           <p className="text-xs text-slate-400">{a.age}y</p>
                         </td>
@@ -598,47 +604,6 @@ export default function AdminDashboard() {
                           </select>
                         </td>
 
-                        {/* Religious Level */}
-                        <td className="px-6 py-4 text-slate-500">
-                          <select
-                            className="bg-transparent outline-none"
-                            value={a.religiousLevel}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "religiousLevel",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="Orthodox">Orthodox</option>
-                            <option value="Modern">Modern</option>
-                            <option value="Traditional">Traditional</option>
-                            <option value="Conservative">Conservative</option>
-                            <option value="Reform">Reform</option>
-                            <option value="Reconstuctionist">
-                              Reconstuctionist
-                            </option>
-                            <option value="Just Jewish">Just Jewish</option>
-                            <option value="Spiritual">Spiritual</option>
-                          </select>
-                        </td>
-
-                        {/* Subgroup */}
-                        <td className="px-6 py-4 text-slate-500">
-                          <input
-                            className="bg-transparent border-b border-transparent hover:border-slate-200 focus:border-blue-500 outline-none w-32"
-                            defaultValue={a.subGroup}
-                            onBlur={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "subGroup",
-                                e.target.value
-                              )
-                            }
-                          />
-                        </td>
-
                         {/* Ethnicity */}
                         <td className="px-6 py-4 text-slate-500">
                           <select
@@ -652,44 +617,30 @@ export default function AdminDashboard() {
                               )
                             }
                           >
+                            <option value="Syrian">Syrian</option>
+                            <option value="Egyptian">Egyptian</option>
+                            <option value="Lebanese">Lebanese</option>
+                            <option value="Other Sephardic">
+                              Other Sephardic
+                            </option>
                             <option value="Ashkenazi">Ashkenazi</option>
-                            <option value="Sephardi (Syrian)">
-                              Sephardi (Syrian)
-                            </option>
-                            <option value="Sephardi (Persian)">
-                              Sephardi (Persian)
-                            </option>
-                            <option value="Sephardi (Moroccan)">
-                              Sephardi (Moroccan)
-                            </option>
-                            <option value="Sephardi (Other)">
-                              Sephardi (Other)
-                            </option>
+                            <option value="Other">Other</option>
                           </select>
                         </td>
 
-                        {/* Parents */}
-                        <td className="px-6 py-4 text-slate-500">
-                          <select
-                            className="bg-transparent outline-none"
-                            value={a.parents}
-                            onChange={(e) =>
+                        {/* Other Sephardic if applicable */}
+                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                          <textarea
+                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                            defaultValue={a.otherSephardic}
+                            onBlur={(e) =>
                               updateAttendeeField(
                                 a.id,
-                                "parents",
+                                "otherSephardic",
                                 e.target.value
                               )
                             }
-                          >
-                            <option value="Both Jewish">Both Jewish</option>
-                            <option value="Mom is Jewish, Dad is not">
-                              Mom is Jewish
-                            </option>
-                            <option value="Dad is Jewish, Mom is not">
-                              Dad is Jewish
-                            </option>
-                            <option value="Neither">Neither</option>
-                          </select>
+                          />
                         </td>
 
                         {/* Marital Status */}
@@ -708,15 +659,6 @@ export default function AdminDashboard() {
                             <option value="Single">Single</option>
                             <option value="Divorced">Divorced</option>
                             <option value="Widowed">Widowed</option>
-                            <option value="Single with kids">
-                              Single with kids
-                            </option>
-                            <option value="Divorced with kids">
-                              Divorced with kids
-                            </option>
-                            <option value="Widowed with kids">
-                              Widowed with kids
-                            </option>
                           </select>
                         </td>
 
@@ -765,19 +707,103 @@ export default function AdminDashboard() {
                           />
                         </td>
 
-                        {/* Open to Subgroups (Array Edit) */}
-                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                          <textarea
-                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                            defaultValue={a.openToSubGroups?.join(", ")}
-                            onBlur={(e) =>
+                        {/* Shomer Shabbat */}
+                        <td className="px-6 py-4 text-slate-500 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              a.isShomerShabbat === "yes" ||
+                              a.isShomerShabbat === true
+                            }
+                            onChange={(e) =>
                               updateAttendeeField(
                                 a.id,
-                                "openToSubGroups",
-                                e.target.value.split(",").map((s) => s.trim())
+                                "isShomerShabbat",
+                                e.target.checked ? "yes" : "no"
                               )
                             }
                           />
+                        </td>
+
+                        {/* Shomer Kashrut */}
+                        <td className="px-6 py-4 text-slate-500 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              a.isShomerKashrut === "yes" ||
+                              a.isShomerKashrut === true
+                            }
+                            onChange={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "isShomerKashrut",
+                                e.target.checked ? "yes" : "no"
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Wants Girl to cover her hair */}
+                        <td className="px-6 py-4 text-slate-500 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              a.wantsCoveredHead === "yes" ||
+                              a.wantsCoveredHead === true
+                            }
+                            onChange={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "wantsCoveredHead",
+                                e.target.checked ? "yes" : "no"
+                              )
+                            }
+                          />
+                        </td>
+
+                        {/* Girl to cover her hair */}
+                        <td className="px-6 py-4 text-slate-500">
+                          <select
+                            className="bg-transparent outline-none"
+                            value={a.hairCovering}
+                            onChange={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "hairCovering",
+                                e.target.value
+                              )
+                            }
+                          >
+                            <option value="N/A">Not applicable</option>
+                            <option value="willCoverHair">
+                              Will cover hair
+                            </option>
+                            <option value="openFlexible">
+                              Open / Flexible
+                            </option>
+                            <option value="notPlanning">
+                              Not planning to cover hair
+                            </option>
+                          </select>
+                        </td>
+
+                        {/* Dress Style */}
+                        <td className="px-6 py-4 text-slate-500">
+                          <select
+                            className="bg-transparent outline-none"
+                            value={a.dressStyle}
+                            onChange={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "dressStyle",
+                                e.target.value
+                              )
+                            }
+                          >
+                            <option value="N/A">Not applicable</option>
+                            <option value="skirtsOnly">Skirts only</option>
+                            <option value="skirtsPants">Skirts + pants</option>
+                          </select>
                         </td>
 
                         {/* Actions */}
