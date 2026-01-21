@@ -22,11 +22,9 @@ import { useSearchParams } from "react-router-dom";
 //   "Out of the box",
 // ];
 const ETHNICITIES = [
-  "Syrian",
-  "Egyptian",
-  "Lebanese",
+  "Syrian / Egyptian / Lebanese",
   "Other Sephardic",
-  "Ashkenazi",
+  "Ashkenaz",
   "Other",
 ];
 const MARITAL_STATUSES = ["Single", "Divorced", "Widowed"];
@@ -46,15 +44,10 @@ export default function RegistrationForm() {
     email: "",
     phone: "",
     gender: "",
-    // targetGender: "",
     birthDate: "",
     ageRange: { min: 18, max: 40 },
-    // parents: "",
-    // religiousLevel: "",
-    // subGroup: "",
-    // openToSubGroups: [],
     ethnicity: "",
-    otherSephardic: "",
+    otherSpecify: "",
     openToEthnicities: [],
     isKohen: "no",
     isShomerShabbat: "yes",
@@ -64,6 +57,7 @@ export default function RegistrationForm() {
     dressStyle: "N/A",
     maritalStatus: "",
     openToMaritalStatus: [],
+    anythingElse: "",
   });
 
   // Fetch events or specific event name
@@ -227,14 +221,6 @@ export default function RegistrationForm() {
                 <option value="woman">Woman</option>
               </select>
             </div>
-            {/* <div className="flex-1">
-            <label className="block text-sm font-medium mb-1">Looking for a...</label>
-            <select required className="w-full p-3 border rounded-lg" onChange={(e) => setFormData({...formData, targetGender: e.target.value})}>
-              <option value="">Select</option>
-              <option value="man">Man</option>
-              <option value="woman">Woman</option>
-            </select>
-          </div> */}
           </div>
 
           {/* Target Age Range Choice */}
@@ -314,7 +300,7 @@ export default function RegistrationForm() {
 
           {/* Ethnicity */}
           <section>
-            <label className="block font-semibold mb-2">Ethnicity</label>
+            <label className="block font-semibold mb-2">What is your background?</label>
             <select
               required
               className="w-full p-3 border rounded-lg mb-2"
@@ -351,18 +337,18 @@ export default function RegistrationForm() {
             </div>
           </section>
 
-          {/* Specify for Other Sephardic option */}
-          {formData.ethnicity === "Other Sephardic" && (
+          {/* Specify for Other option */}
+          {formData.ethnicity === "Other" && (
             <section>
               <label className="block font-semibold mb-2">
-                Please specify your Sephardic background:
+                Please specify your background:
               </label>
               <input
                 type="text"
-                placeholder="e.g., Moroccan, Persian, etc."
+                placeholder="e.g., Chasidish, Chabad, etc."
                 className="w-full p-3 border rounded-lg mb-2"
                 onChange={(e) =>
-                  setFormData({ ...formData, otherSephardic: e.target.value })
+                  setFormData({ ...formData, otherSpecify: e.target.value })
                 }
               />
             </section>
@@ -410,7 +396,7 @@ export default function RegistrationForm() {
           {/* Religious Lifestyle */}
           <section>
               <label className="block font-semibold mb-2">
-                What is your Shabbat level?
+                Shabbat level
               </label>
               <div className="flex gap-4">
                 <label className="flex items-center gap-2">
@@ -423,7 +409,7 @@ export default function RegistrationForm() {
                       setFormData({ ...formData, isShomerShabbat: "yes" })
                     }
                   />{" "}
-                  I keep Shabbat
+                  Shomer Shabbat
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -432,7 +418,7 @@ export default function RegistrationForm() {
                     value="no"
                     onChange={() => setFormData({ ...formData, isShomerShabbat: "no" })}
                   />{" "}
-                  Not Shomer Shabbat / Still growing
+                  Not fully shomer shabbat / still growing
                 </label>
               </div>
             </section>
@@ -441,7 +427,7 @@ export default function RegistrationForm() {
           {/* Religious Lifestyle 2 */}
           <section>
               <label className="block font-semibold mb-2">
-                What is your Kashrut level?
+                Kashrut level
               </label>
               <div className="flex gap-4">
                 <label className="flex items-center gap-2">
@@ -454,7 +440,7 @@ export default function RegistrationForm() {
                       setFormData({ ...formData, isShomerKashrut: "yes" })
                     }
                   />{" "}
-                  I keep Kosher
+                  Kosher
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -463,7 +449,7 @@ export default function RegistrationForm() {
                     value="no"
                     onChange={() => setFormData({ ...formData, isShomerKashrut: "no" })}
                   />{" "}
-                  Not strictly kosher / Still growing
+                  Not fully kosher / still growing
                 </label>
               </div>
             </section>
@@ -472,7 +458,7 @@ export default function RegistrationForm() {
           {formData.gender === "woman" && (
             <section>
               <label className="block font-semibold mb-2">
-                What is your preferred dress style?
+                Dress style
               </label>
               <div className="flex gap-4 mb-4">
                 <label className="flex items-center gap-2">
@@ -480,7 +466,6 @@ export default function RegistrationForm() {
                     type="radio"
                     name="dressStyle"
                     value="skirtsOnly"
-                    defaultChecked
                     onChange={() =>
                       setFormData({ ...formData, dressStyle: "skirtsOnly" })
                     }
@@ -504,7 +489,7 @@ export default function RegistrationForm() {
           {formData.gender === "woman" && (
             <section>
               <label className="block font-semibold mb-2">
-                Hair covering after marriage?
+                Hair covering
               </label>
               <div className="flex gap-4 mb-4">
                 <label className="flex items-center gap-2">
@@ -512,21 +497,11 @@ export default function RegistrationForm() {
                     type="radio"
                     name="hairCovering"
                     value="willCoverHair"
-                    defaultChecked
                     onChange={() =>
                       setFormData({ ...formData, hairCovering: "willCoverHair" })
                     }
                   />{" "}
-                  Will cover hair
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="hairCovering"
-                    value="openFlexible"
-                    onChange={() => setFormData({ ...formData, hairCovering: "openFlexible" })}
-                  />{" "}
-                  Open / flexible
+                  Will cover hair after marriage
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -536,6 +511,15 @@ export default function RegistrationForm() {
                     onChange={() => setFormData({ ...formData, hairCovering: "notPlanning" })}
                   />{" "}
                   Not planning to cover hair
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="hairCovering"
+                    value="openFlexible"
+                    onChange={() => setFormData({ ...formData, hairCovering: "openFlexible" })}
+                  />{" "}
+                  Open / flexible
                 </label>
               </div>
             </section>
@@ -603,9 +587,38 @@ export default function RegistrationForm() {
                   />{" "}
                   No
                 </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="coverHead"
+                    value="noPreference"
+                    onChange={() =>
+                      setFormData({ ...formData, wantsCoveredHead: "noPreference" })
+                    }
+                  />{" "}
+                  Doesn't matter
+                </label>
               </div>
             </section>
           )}
+
+          {/* Anything Else */}
+          <div className="flex gap-4">
+            <div className="flex-3">
+              <label className="block font-semibold mb-2">
+                Is there anything else you'd like us to know?
+              </label>
+              <input
+                type="text"
+                placeholder="Anything else?"
+                required
+                className="w-full p-3 border rounded-lg mb-2"
+                onChange={(e) =>
+                  setFormData({ ...formData, anythingElse: e.target.value })
+                }
+              />
+            </div>
+          </div>
 
           <button
             disabled={loading}
