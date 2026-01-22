@@ -45,7 +45,6 @@ export default function RegistrationForm() {
     phone: "",
     gender: "",
     birthDate: "",
-    ageRange: { min: 18, max: 40 },
     ethnicity: "",
     otherSpecify: "",
     openToEthnicities: [],
@@ -186,91 +185,12 @@ export default function RegistrationForm() {
             </div>
           </div>
 
-          {/* Birth Date Info */}
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <label className="block text-sm font-medium mb-1">
-                Your Birth Date
-              </label>
-              <input
-                type="date"
-                required
-                className="p-3 border rounded-lg text-gray-500"
-                onChange={(e) =>
-                  setFormData({ ...formData, birthDate: e.target.value })
-                }
-              />
-            </div>
-          </div>
-
-          {/* Gender Choice */}
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <label className="block text-sm font-medium mb-1">
-                You're a...
-              </label>
-              <select
-                required
-                className="w-full p-3 border rounded-lg"
-                onChange={(e) =>
-                  setFormData({ ...formData, gender: e.target.value })
-                }
-              >
-                <option value="">Select</option>
-                <option value="man">Man</option>
-                <option value="woman">Woman</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Target Age Range Choice */}
-          <section>
-            <label className="block font-semibold mb-2">
-              Preferred Age Range
-            </label>
-            <div className="flex gap-4">
-              <input
-                type="number"
-                min="18"
-                max="100"
-                placeholder="Min Age"
-                required
-                className="w-full p-3 border rounded-lg"
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    ageRange: {
-                      ...formData.ageRange,
-                      min: parseInt(e.target.value),
-                    },
-                  })
-                }
-              />
-              <input
-                type="number"
-                min="18"
-                max="100"
-                placeholder="Max Age"
-                required
-                className="w-full p-3 border rounded-lg"
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    ageRange: {
-                      ...formData.ageRange,
-                      max: parseInt(e.target.value),
-                    },
-                  })
-                }
-              />
-            </div>
-          </section>
-
+          
           {/* Phone and email */}
           <div className="flex gap-4">
             <div className="flex-1">
               <label className="block text-sm font-medium mb-1">
-                Phone Number
+                Cell Phone Number
               </label>
               <input
                 type="tel"
@@ -298,6 +218,62 @@ export default function RegistrationForm() {
             </div>
           </div>
 
+          {/* Gender Choice */}
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">
+                Gender
+              </label>
+              <select
+                required
+                className="w-full p-3 border rounded-lg"
+                onChange={(e) =>
+                  setFormData({ ...formData, gender: e.target.value })
+                }
+              >
+                <option value="">Select</option>
+                <option value="man">Man</option>
+                <option value="woman">Woman</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Birth Date Info */}
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">
+                Date of birth
+              </label>
+              <input
+                type="date"
+                required
+                className="p-3 border rounded-lg text-gray-500"
+                onChange={(e) =>
+                  setFormData({ ...formData, birthDate: e.target.value })
+                }
+              />
+            </div>
+          </div>
+
+          {/* Current Marital Status */}
+          <section>
+            <label className="block font-semibold mb-2">Current Status</label>
+            <select
+              required
+              className="w-full p-3 border rounded-lg mb-2"
+              onChange={(e) =>
+                setFormData({ ...formData, maritalStatus: e.target.value })
+              }
+            >
+              <option value="">Select yours...</option>
+              {MARITAL_STATUSES.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </section>
+
           {/* Ethnicity */}
           <section>
             <label className="block font-semibold mb-2">What is your background?</label>
@@ -315,26 +291,6 @@ export default function RegistrationForm() {
                 </option>
               ))}
             </select>
-            <label className="block text-sm text-gray-600 mb-2 italic">
-              I am open to date someone who is:
-            </label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-              {ETHNICITIES.map((opt) => (
-                <label key={opt} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    onChange={() =>
-                      handleCheckbox(
-                        formData.openToEthnicities,
-                        opt,
-                        "openToEthnicities"
-                      )
-                    }
-                  />
-                  {opt}
-                </label>
-              ))}
-            </div>
           </section>
 
           {/* Specify for Other option */}
@@ -353,45 +309,6 @@ export default function RegistrationForm() {
               />
             </section>
           )}
-
-          {/* Marital Status */}
-          <section>
-            <label className="block font-semibold mb-2">Marital Status</label>
-            <select
-              required
-              className="w-full p-3 border rounded-lg mb-2"
-              onChange={(e) =>
-                setFormData({ ...formData, maritalStatus: e.target.value })
-              }
-            >
-              <option value="">Select yours...</option>
-              {MARITAL_STATUSES.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-            <label className="block text-sm text-gray-600 mb-2 italic">
-              I am open to date someone who is:
-            </label>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              {MARITAL_STATUSES.map((opt) => (
-                <label key={opt} className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    onChange={() =>
-                      handleCheckbox(
-                        formData.openToMaritalStatus,
-                        opt,
-                        "openToMaritalStatus"
-                      )
-                    }
-                  />
-                  {opt}
-                </label>
-              ))}
-            </div>
-          </section>
 
           {/* Religious Lifestyle */}
           <section>
