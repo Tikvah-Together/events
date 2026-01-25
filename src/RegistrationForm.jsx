@@ -232,8 +232,8 @@ export default function RegistrationForm() {
                 }
               >
                 <option value="">Select</option>
-                <option value="man">Man</option>
-                <option value="woman">Woman</option>
+                <option value="man">Male</option>
+                <option value="woman">Female</option>
               </select>
             </div>
           </div>

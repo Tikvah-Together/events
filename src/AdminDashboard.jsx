@@ -38,13 +38,10 @@ export default function AdminDashboard() {
       // 1. Update Firestore
       await updateDoc(eventRef, { active: newStatus });
       if (newStatus) {
-        // delete all non-checked-in attendees when activating
-        await deleteAttendeesNotCheckedIn(id);
         // If activating, launch the event
         launchEvent();
       } else {
         // If deactivating, set all attendees to not checked in
-        // await setAttendeesNotCheckedIn(id);
       }
 
       // 2. Update the Main Detail View immediately
@@ -59,17 +56,6 @@ export default function AdminDashboard() {
     } catch (err) {
       console.error("Error updating status:", err);
     }
-  };
-
-  const deleteAttendeesNotCheckedIn = async (id) => {
-    const attQuery = query(
-      collection(db, "registrations"),
-      where("eventId", "==", id),
-      where("checkedIn", "==", false)
-    );
-    const attSnap = await getDocs(attQuery);
-    const deletePromises = attSnap.docs.map((doc) => deleteDoc(doc.ref));
-    await Promise.all(deletePromises);
   };
 
   const setAttendeesNotCheckedIn = async (id) => {
@@ -152,15 +138,59 @@ export default function AdminDashboard() {
     });
   };
 
-  const toggleCheckIn = async (attendeeId, currentStatus) => {
-    try {
-      const attRef = doc(db, "registrations", attendeeId);
-      await updateDoc(attRef, { checkedIn: !currentStatus });
-      // Real-time listener handles the UI update
-    } catch (err) {
-      console.error("Error updating check-in:", err);
+const toggleCheckIn = async (attendeeId, currentStatus) => {
+  try {
+    const newStatus = !currentStatus;
+
+    const attQuery = query(
+      collection(db, "registrations"),
+      where("eventId", "==", selectedEvent.id)
+    );
+    const attSnap = await getDocs(attQuery);
+    const allAttendees = attSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    const person = allAttendees.find(a => a.id === attendeeId);
+    if (!person) return;
+
+    const gender = person.gender; 
+    const prefix = gender === "woman" ? "G" : "B";
+
+    // 1. Update local data and Sort by firstName then lastName
+    const sameGenderList = allAttendees
+      .map(a => a.id === attendeeId ? { ...a, checkedIn: newStatus } : a)
+      .filter(a => a.gender === gender && a.checkedIn)
+      .sort((a, b) => {
+        // Combine names for a proper alphabetical sort
+        const nameA = `${a.firstName || ""} ${a.lastName || ""}`.trim();
+        const nameB = `${b.firstName || ""} ${b.lastName || ""}`.trim();
+        return nameA.localeCompare(nameB);
+      });
+
+    const updates = [];
+
+    // 2. Clear table for the person being unchecked
+    if (!newStatus) {
+      updates.push(updateDoc(doc(db, "registrations", attendeeId), { 
+        checkedIn: false, 
+        tableNumber: null 
+      }));
     }
-  };
+
+    // 3. Re-sequence the list
+    sameGenderList.forEach((attendee, index) => {
+      const newTable = `${prefix}${index + 1}`;
+      updates.push(updateDoc(doc(db, "registrations", attendee.id), { 
+        checkedIn: true, 
+        tableNumber: newTable 
+      }));
+    });
+
+    await Promise.all(updates);
+
+  } catch (err) {
+    console.error("Error updating check-in:", err);
+  }
+};
 
   const deleteAttendee = async (attendeeId, name) => {
     if (window.confirm(`Remove ${name} from this event?`)) {
@@ -169,15 +199,6 @@ export default function AdminDashboard() {
       } catch (err) {
         console.error("Error deleting attendee:", err);
       }
-    }
-  };
-
-  const updateAttendeeGender = async (attendeeId, newGender) => {
-    try {
-      const attRef = doc(db, "registrations", attendeeId);
-      await updateDoc(attRef, { gender: newGender });
-    } catch (err) {
-      console.error("Error updating gender:", err);
     }
   };
 
@@ -299,9 +320,9 @@ export default function AdminDashboard() {
       <div
         className={`${
           selectedEvent ? "hidden md:flex" : "flex"
-        } w-full md:w-80 bg-white border-r border-slate-200 p-6 flex-col h-full`}
+        } w-full md:w-auto bg-white border-r border-slate-200 p-6 flex-col h-full`}
       >
-        <h2 className="text-xl font-bold text-blue-900 mb-6 tracking-tight">
+        <h2 className="text-xl font-bold text-blue-900 mb-6">
           Events Management
         </h2>
 
@@ -383,9 +404,9 @@ export default function AdminDashboard() {
       </div>
 
       {/* MAIN CONTENT: Event Details */}
-      <div className="flex-1 p-4 md:p-10 overflow-auto">
+      <div className="flex-1 p-4 overflow-auto">
         {selectedEvent ? (
-          <div className="max-w-4xl mx-auto">
+          <div className="w-full max-w-7xl mx-auto">
             <button
               onClick={() => setSelectedEvent(null)}
               className="md:hidden mb-4 text-blue-600 font-bold flex items-center gap-2"
@@ -393,7 +414,7 @@ export default function AdminDashboard() {
               ← Back to Events
             </button>
             {/* HEADER SECTION */}
-            <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-6 mb-10 pb-6 border-b border-slate-200">
+            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-6 mb-10 pb-6 border-b border-slate-200">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-2xl md:text-4xl font-bold text-slate-900">
@@ -488,7 +509,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* STATS CARDS */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm text-center">
                 <p className="text-3xl font-bold text-slate-800">
                   {attendees.length}
@@ -522,13 +543,17 @@ export default function AdminDashboard() {
                 <table className="w-full text-left text-sm min-w-[1600px]">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
                     <tr>
-                      <th className="px-6 py-4 sticky left-0 bg-slate-50 z-10">
+                      <th className="px-6 py-4 sticky left-0 bg-slate-50 z-20">
                         Status
                       </th>
-                      <th className="px-6 py-4 sticky left-[120px] bg-slate-50 z-10">
+                      <th className="px-6 py-4 sticky left-[110px] bg-slate-50 z-20">
+                        Confirmed
+                      </th>
+                      <th className="px-6 py-4 sticky left-[120px] bg-slate-50 z-20">
                         Name / Age
                       </th>
                       <th className="px-6 py-4">Gender</th>
+                      <th className="px-6 py-4">Table Number</th>
                       <th className="px-6 py-4">Ethnicity</th>
                       <th className="px-6 py-4">
                         Other Background
@@ -555,13 +580,13 @@ export default function AdminDashboard() {
                         className="hover:bg-slate-50 transition-colors group"
                       >
                         {/* Status */}
-                        <td className="px-6 py-4 sticky left-0 bg-white group-hover:bg-slate-50">
+                        <td className="px-6 py-4 sticky left-0 bg-white group-hover:bg-slate-50 z-10 border-r border-slate-100">
                           <button
                             onClick={() => toggleCheckIn(a.id, a.checkedIn)}
                             className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
                               a.checkedIn
                                 ? "bg-green-100 text-green-700"
-                                : "bg-slate-100 text-slate-400"
+                                : "bg-yellow-100 text-yellow-800"
                             }`}
                           >
                             {a.checkedIn ? (
@@ -573,8 +598,23 @@ export default function AdminDashboard() {
                           </button>
                         </td>
 
+                        {/* Confirmed */}
+                        <td className="px-6 py-4 sticky left-[110px] bg-white group-hover:bg-slate-50 z-10 border-r border-slate-100">
+                          <input
+                            type="checkbox"
+                            checked={a.isConfirmed === "yes" || a.isConfirmed === true}
+                            onChange={(e) =>
+                              updateAttendeeField(
+                                a.id,
+                                "isConfirmed",
+                                e.target.checked ? "yes" : "no"
+                              )
+                            }
+                          />
+                        </td>
+
                         {/* Name */}
-                        <td className="px-6 py-4 sticky left-[120px] bg-white group-hover:bg-slate-50 border-r border-slate-100">
+                        <td className="px-6 py-4 sticky left-[110px] bg-white group-hover:bg-slate-50 z-10 border-r border-slate-100">
                           <p className="font-bold text-slate-900 truncate max-w-[150px]">
                             {a.firstName} {a.lastName}
                           </p>
@@ -601,6 +641,11 @@ export default function AdminDashboard() {
                             <option value="man">Man</option>
                             <option value="woman">Woman</option>
                           </select>
+                        </td>
+
+                        {/* Table Number */}
+                        <td className="px-6 py-4 text-slate-800 font-mono">
+                          {a.tableNumber || "-"}
                         </td>
 
                         {/* Ethnicity */}
