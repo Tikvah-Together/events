@@ -3,6 +3,8 @@ import { db } from "./firebase";
 import {
   collection,
   addDoc,
+  documentId,
+  getDoc,
   getDocs,
   doc,
   updateDoc,
@@ -29,6 +31,82 @@ export default function AdminDashboard() {
   const [eventName, setEventName] = useState("");
   const [roundTime, setRoundTime] = useState(7);
   const [loading, setLoading] = useState(false);
+  const [filters, setFilters] = useState({
+    hashgafa: "all",
+    minAgeMan: "",
+    maxAgeMan: "",
+    minAgeWoman: "",
+    maxAgeWoman: "",
+    shomerShabbat: "all",
+    ethnicity: "all",
+  });
+
+  const getHashgafaGroup = (user) => {
+    const { gender, hairCovering, wantsCoveredHead, dressStyle } = user;
+
+    // Group 1: Expected
+    if (
+      (gender === "woman" &&
+        dressStyle === "skirtsOnly" &&
+        hairCovering === "willCoverHair") ||
+      (gender === "man" && wantsCoveredHead === "yes")
+    ) {
+      return {
+        label: "Expected",
+        color: "bg-purple-100 text-purple-700",
+        border: "border-purple-200",
+      };
+    }
+
+    // Group 2: No Hair-Covering Expected
+    if (
+      (gender === "woman" &&
+        dressStyle === "skirtsPants" &&
+        hairCovering === "notPlanning") ||
+      (gender === "man" && wantsCoveredHead === "no")
+    ) {
+      return {
+        label: "None",
+        color: "bg-blue-100 text-blue-700",
+        border: "border-blue-200",
+      };
+    }
+
+    // Group 3: Flexible
+    return {
+      label: "Flexible",
+      color: "bg-green-100 text-green-700",
+      border: "border-green-200",
+    };
+  };
+
+  // Derived Data: Filtered List
+  const filteredAttendees = attendees.filter((a) => {
+    const h = getHashgafaGroup(a);
+
+    // Hashgafa Filter
+    if (filters.hashgafa !== "all" && h.label !== filters.hashgafa)
+      return false;
+
+    // Gender-based Age Filters
+    if (a.gender === "man") {
+      if (filters.minAgeMan && a.age < filters.minAgeMan) return false;
+      if (filters.maxAgeMan && a.age > filters.maxAgeMan) return false;
+    } else {
+      if (filters.minAgeWoman && a.age < filters.minAgeWoman) return false;
+      if (filters.maxAgeWoman && a.age > filters.maxAgeWoman) return false;
+    }
+
+    // Shomer Shabbat Filter
+    if (filters.shomerShabbat !== "all") {
+      const isShomer =
+        a.isShomerShabbat === "yes" || a.isShomerShabbat === true;
+      if (filters.shomerShabbat === "yes" && !isShomer) return false;
+      if (filters.shomerShabbat === "no" && isShomer) return false;
+    }
+
+    return true;
+  });
 
   const toggleStatus = async (id, currentStatus) => {
     try {
@@ -42,6 +120,7 @@ export default function AdminDashboard() {
         launchEvent();
       } else {
         // If deactivating, set all attendees to not checked in
+        setAttendeesNotCheckedIn(id);
       }
 
       // 2. Update the Main Detail View immediately
@@ -50,8 +129,8 @@ export default function AdminDashboard() {
       // 3. Update the Sidebar List immediately so the green dot appears/disappears
       setEvents((prevEvents) =>
         prevEvents.map((ev) =>
-          ev.id === id ? { ...ev, active: newStatus } : ev
-        )
+          ev.id === id ? { ...ev, active: newStatus } : ev,
+        ),
       );
     } catch (err) {
       console.error("Error updating status:", err);
@@ -61,11 +140,11 @@ export default function AdminDashboard() {
   const setAttendeesNotCheckedIn = async (id) => {
     const attQuery = query(
       collection(db, "registrations"),
-      where("eventId", "==", id)
+      where("eventId", "==", id),
     );
     const attSnap = await getDocs(attQuery);
     const resetPromises = attSnap.docs.map((doc) =>
-      updateDoc(doc.ref, { checkedIn: false, tableNumber: null })
+      updateDoc(doc.ref, { checkedIn: false, tableNumber: null }),
     );
     await Promise.all(resetPromises);
   };
@@ -82,10 +161,10 @@ export default function AdminDashboard() {
 
     // 1. Auto-Assign Tables
     const womenUpdates = women.map((w, i) =>
-      updateDoc(doc(db, "registrations", w.id), { tableNumber: i + 1 })
+      updateDoc(doc(db, "registrations", w.id), { tableNumber: i + 1 }),
     );
     const menUpdates = men.map((m, i) =>
-      updateDoc(doc(db, "registrations", m.id), { tableNumber: i + 1 })
+      updateDoc(doc(db, "registrations", m.id), { tableNumber: i + 1 }),
     );
 
     await Promise.all([...womenUpdates, ...menUpdates]);
@@ -99,98 +178,82 @@ export default function AdminDashboard() {
     });
   };
 
-  const assignInitialTables = async () => {
-    const men = attendees.filter((a) => a.gender === "man");
-    const women = attendees.filter((a) => a.gender === "woman");
+  const toggleCheckIn = async (attendeeId, currentStatus) => {
+    try {
+      const newStatus = !currentStatus;
+      const regRef = doc(db, "registrations", attendeeId);
 
-    // Assign Women to fixed tables 1 through N
-    const womenUpdates = women.map((w, i) =>
-      updateDoc(doc(db, "registrations", w.id), { tableNumber: i + 1 })
-    );
+      // 1. Fetch current state to know gender and current participants
+      const attQuery = query(
+        collection(db, "registrations"),
+        where("eventId", "==", selectedEvent.id),
+      );
+      const attSnap = await getDocs(attQuery);
+      const allRegs = attSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const person = allRegs.find((a) => a.id === attendeeId);
+      if (!person) return;
 
-    // Assign Men to starting tables 1 through N
-    const menUpdates = men.map((m, i) =>
-      updateDoc(doc(db, "registrations", m.id), { tableNumber: i + 1 })
-    );
+      const gender = person.gender;
+      const prefix = gender === "woman" ? "G" : "B";
 
-    await Promise.all([...womenUpdates, ...menUpdates]);
-    alert("Tables Assigned! Men and Women are now matched for Round 1.");
-  };
+      if (!newStatus) {
+        // --- UNCHECKING: CLOSE THE GAPS ---
+        // 1. Set the target person to inactive
+        await updateDoc(regRef, { checkedIn: false, tableNumber: null });
 
-  const nextRound = async () => {
-    const next = (selectedEvent.currentRound || 1) + 1;
-    await updateDoc(doc(db, "events", selectedEvent.id), {
-      currentRound: next,
-      isTransitioning: true, // Trigger the "Move" screen on iPads
-    });
+        // 2. Get all OTHER people of this gender who are still checked in
+        const remaining = allRegs
+          .filter(
+            (a) => a.gender === gender && a.checkedIn && a.id !== attendeeId,
+          )
+          .sort((a, b) => {
+            const numA = parseInt(a.tableNumber?.replace(prefix, "") || 0);
+            const numB = parseInt(b.tableNumber?.replace(prefix, "") || 0);
+            return numA - numB;
+          });
 
-    // Auto-stop the transition after 60 seconds
-    setTimeout(async () => {
-      await updateDoc(doc(db, "events", selectedEvent.id), {
-        isTransitioning: false,
+        // 3. Re-assign them numbers 1 through N to close the gap
+        const shiftPromises = remaining.map((player, index) => {
+          const newTable = `${prefix}${index + 1}`;
+          // Only update if the number actually needs to change
+          if (player.tableNumber !== newTable) {
+            return updateDoc(doc(db, "registrations", player.id), {
+              tableNumber: newTable,
+            });
+          }
+          return null;
+        });
+
+        await Promise.all(shiftPromises.filter((p) => p !== null));
+        return;
+      }
+
+      // --- CHECKING IN: ADD TO END OR FILL GAP ---
+      // (Your existing logic for "Checking In" works fine as a "First Fit"
+      // but with the un-check logic above, there will rarely be gaps to fill!)
+
+      const takenNumbers = allRegs
+        .filter((a) => a.gender === gender && a.checkedIn)
+        .map((a) => parseInt(a.tableNumber.replace(prefix, "")))
+        .sort((a, b) => a - b);
+
+      let assignedNumber = 1;
+      for (let i = 0; i < takenNumbers.length; i++) {
+        if (takenNumbers[i] === assignedNumber) {
+          assignedNumber++;
+        } else if (takenNumbers[i] > assignedNumber) {
+          break;
+        }
+      }
+
+      await updateDoc(regRef, {
+        checkedIn: true,
+        tableNumber: `${prefix}${assignedNumber}`,
       });
-    }, 60000);
-  };
-
-  const toggleTransition = async () => {
-    await updateDoc(doc(db, "events", selectedEvent.id), {
-      isTransitioning: !selectedEvent.isTransitioning,
-    });
-  };
-
-const toggleCheckIn = async (attendeeId, currentStatus) => {
-  try {
-    const newStatus = !currentStatus;
-
-    const attQuery = query(
-      collection(db, "registrations"),
-      where("eventId", "==", selectedEvent.id)
-    );
-    const attSnap = await getDocs(attQuery);
-    const allAttendees = attSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-    const person = allAttendees.find(a => a.id === attendeeId);
-    if (!person) return;
-
-    const gender = person.gender; 
-    const prefix = gender === "woman" ? "G" : "B";
-
-    // 1. Update local data and Sort by firstName then lastName
-    const sameGenderList = allAttendees
-      .map(a => a.id === attendeeId ? { ...a, checkedIn: newStatus } : a)
-      .filter(a => a.gender === gender && a.checkedIn)
-      .sort((a, b) => {
-        // Combine names for a proper alphabetical sort
-        const nameA = `${a.firstName || ""} ${a.lastName || ""}`.trim();
-        const nameB = `${b.firstName || ""} ${b.lastName || ""}`.trim();
-        return nameA.localeCompare(nameB);
-      });
-
-    const updates = [];
-
-    // 2. Clear table for the person being unchecked
-    if (!newStatus) {
-      updates.push(updateDoc(doc(db, "registrations", attendeeId), { 
-        checkedIn: false, 
-        tableNumber: null 
-      }));
+    } catch (err) {
+      console.error("Error updating check-in:", err);
     }
-
-    // 3. Re-sequence the list
-    sameGenderList.forEach((attendee, index) => {
-      const newTable = `${prefix}${index + 1}`;
-      updates.push(updateDoc(doc(db, "registrations", attendee.id), { 
-        checkedIn: true, 
-        tableNumber: newTable 
-      }));
-    });
-
-    await Promise.all(updates);
-
-  } catch (err) {
-    console.error("Error updating check-in:", err);
-  }
-};
+  };
 
   const deleteAttendee = async (attendeeId, name) => {
     if (window.confirm(`Remove ${name} from this event?`)) {
@@ -219,16 +282,53 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
     return () => unsubscribe();
   }, []);
 
-  // 2. Fetch attendees when an event is selected
+  // 2. Fetch attendees when an event is selected (Updated for Users DB)
   useEffect(() => {
     if (!selectedEvent) return;
+
     const q = query(
       collection(db, "registrations"),
-      where("eventId", "==", selectedEvent.id)
+      where("eventId", "==", selectedEvent.id),
     );
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setAttendees(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+
+    const unsubscribe = onSnapshot(q, async (snap) => {
+      const registrationDocs = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      }));
+
+      if (registrationDocs.length === 0) {
+        setAttendees([]);
+        return;
+      }
+
+      // Get all unique userIds from the registrations
+      const userIds = registrationDocs.map((reg) => reg.userId).filter(Boolean);
+
+      if (userIds.length > 0) {
+        // Fetch user profiles from the 'users' collection
+        const usersQuery = query(
+          collection(db, "users"),
+          where(documentId(), "in", userIds),
+        );
+        const userSnap = await getDocs(usersQuery);
+        const userMap = {};
+        userSnap.forEach((doc) => {
+          userMap[doc.id] = doc.data();
+        });
+
+        // Merge Registration data with User profile data
+        const mergedData = registrationDocs.map((reg) => ({
+          ...reg,
+          ...(userMap[reg.userId] || {}), // Spread user profile data into the attendee object
+        }));
+
+        setAttendees(mergedData);
+      } else {
+        setAttendees(registrationDocs);
+      }
     });
+
     return () => unsubscribe();
   }, [selectedEvent]);
 
@@ -239,7 +339,7 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
       // We only want to delete events that have a scheduledAt date
       const q = query(
         collection(db, "events"),
-        where("scheduledAt", "<", seventyTwoHoursAgo)
+        where("scheduledAt", "<", seventyTwoHoursAgo),
       );
       const snapshot = await getDocs(q);
 
@@ -247,11 +347,11 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
         // Delete registrations first (optional but recommended for data hygiene)
         const regQ = query(
           collection(db, "registrations"),
-          where("eventId", "==", eventDoc.id)
+          where("eventId", "==", eventDoc.id),
         );
         const regSnap = await getDocs(regQ);
         regSnap.forEach(
-          async (r) => await deleteDoc(doc(db, "registrations", r.id))
+          async (r) => await deleteDoc(doc(db, "registrations", r.id)),
         );
 
         // Delete the event itself
@@ -294,19 +394,36 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
     setLoading(false);
   };
 
-  const updateAttendeeField = async (attendeeId, field, newValue) => {
+  const updateAttendeeField = async (attendee, field, newValue) => {
     try {
-      const attRef = doc(db, "registrations", attendeeId);
-      await updateDoc(attRef, { [field]: newValue });
+      const registrationFields = ["checkedIn", "tableNumber", "isConfirmed"];
+      const isRegistrationField = registrationFields.includes(field);
+
+      const collectionName = isRegistrationField ? "registrations" : "users";
+      const docId = isRegistrationField ? attendee.id : attendee.userId;
+
+      if (!docId) return;
+
+      const docRef = doc(db, collectionName, docId);
+      await updateDoc(docRef, { [field]: newValue });
+
+      setAttendees((prev) =>
+        prev.map((a) =>
+          (isRegistrationField ? a.id === docId : a.userId === docId)
+            ? { ...a, [field]: newValue }
+            : a,
+        ),
+      );
     } catch (err) {
       console.error(`Error updating ${field}:`, err);
+      alert("Failed to update. Please check your connection.");
     }
   };
 
   const deleteEvent = async (id) => {
     if (
       window.confirm(
-        "Are you sure? This will delete all registration data for this event."
+        "Are you sure? This will delete all registration data for this event.",
       )
     ) {
       await deleteDoc(doc(db, "events", id));
@@ -508,64 +625,120 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
               </div>
             </div>
 
-            {/* STATS CARDS */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm text-center">
-                <p className="text-3xl font-bold text-slate-800">
-                  {attendees.length}
-                </p>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Registered
-                </p>
-              </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm text-center">
-                <div className="text-blue-900 font-bold text-3xl">
-                  {attendees.filter((a) => a.gender === "man").length}
+            {/* FILTER SYSTEM */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                {/* Hashgafa */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">
+                    Hashgafa Group
+                  </label>
+                  <select
+                    className="w-full p-2 border rounded text-sm"
+                    value={filters.hashgafa}
+                    onChange={(e) =>
+                      setFilters({ ...filters, hashgafa: e.target.value })
+                    }
+                  >
+                    <option value="all">All Groups</option>
+                    <option value="Expected">Expected (Purple)</option>
+                    <option value="Flexible">Flexible (Green)</option>
+                    <option value="None">No Hair Covering (Blue)</option>
+                  </select>
                 </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Men
-                </p>
-              </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm text-center">
-                <div className="text-pink-600 font-bold text-3xl">
-                  {attendees.filter((a) => a.gender === "woman").length}
+
+                {/* Age Men */}
+                <div>
+                  <label className="text-[10px] font-bold text-blue-600 uppercase mb-2 block">
+                    Men Age Range
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      placeholder="Min"
+                      className="w-1/2 p-2 border rounded text-sm"
+                      onChange={(e) =>
+                        setFilters({ ...filters, minAgeMan: e.target.value })
+                      }
+                    />
+                    <input
+                      type="number"
+                      placeholder="Max"
+                      className="w-1/2 p-2 border rounded text-sm"
+                      onChange={(e) =>
+                        setFilters({ ...filters, maxAgeMan: e.target.value })
+                      }
+                    />
+                  </div>
                 </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Women
-                </p>
+
+                {/* Age Women */}
+                <div>
+                  <label className="text-[10px] font-bold text-pink-600 uppercase mb-2 block">
+                    Women Age Range
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      placeholder="Min"
+                      className="w-1/2 p-2 border rounded text-sm"
+                      onChange={(e) =>
+                        setFilters({ ...filters, minAgeWoman: e.target.value })
+                      }
+                    />
+                    <input
+                      type="number"
+                      placeholder="Max"
+                      className="w-1/2 p-2 border rounded text-sm"
+                      onChange={(e) =>
+                        setFilters({ ...filters, maxAgeWoman: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+
+                {/* Shabbat */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">
+                    Shomer Shabbat
+                  </label>
+                  <select
+                    className="w-full p-2 border rounded text-sm"
+                    onChange={(e) =>
+                      setFilters({ ...filters, shomerShabbat: e.target.value })
+                    }
+                  >
+                    <option value="all">Any</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </div>
               </div>
             </div>
 
             {/* TABLE SECTION */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              {/* Wrap this div for horizontal scrolling */}
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm min-w-[1600px]">
+                <table className="w-full text-left text-sm min-w-[1800px]">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
                     <tr>
                       <th className="px-6 py-4 sticky left-0 bg-slate-50 z-20">
-                        Status
-                      </th>
-                      <th className="px-6 py-4 sticky left-[110px] bg-slate-50 z-20">
-                        Confirmed
-                      </th>
-                      <th className="px-6 py-4 sticky left-[120px] bg-slate-50 z-20">
                         Name / Age
                       </th>
+                      <th className="px-6 py-4">Hashgafa</th>
+                      <th className="px-6 py-4">Status</th>
                       <th className="px-6 py-4">Gender</th>
                       <th className="px-6 py-4">Table Number</th>
                       <th className="px-6 py-4">Ethnicity</th>
-                      <th className="px-6 py-4">
-                        Other Background
-                      </th>
+                      <th className="px-6 py-4">Other Background</th>
                       <th className="px-6 py-4">Marital Status</th>
                       <th className="px-6 py-4">Kohen</th>
-                      <th className="px-6 py-4">Open to Ethnicities</th>
-                      <th className="px-6 py-4">Open to Marry</th>
                       <th className="px-6 py-4">Shomer Shabbat</th>
                       <th className="px-6 py-4">Shomer Kashrut</th>
                       <th className="px-6 py-4">Wants covered head (Male)</th>
-                      <th className="px-6 py-4">Wants to cover head (Female)</th>
+                      <th className="px-6 py-4">
+                        Wants to cover head (Female)
+                      </th>
                       <th className="px-6 py-4">Dress Style (Female)</th>
                       <th className="px-6 py-4">Anything else</th>
                       <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
@@ -574,312 +747,274 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {attendees.map((a) => (
-                      <tr
-                        key={a.id}
-                        className="hover:bg-slate-50 transition-colors group"
-                      >
-                        {/* Status */}
-                        <td className="px-6 py-4 sticky left-0 bg-white group-hover:bg-slate-50 z-10 border-r border-slate-100">
-                          <button
-                            onClick={() => toggleCheckIn(a.id, a.checkedIn)}
-                            className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
-                              a.checkedIn
-                                ? "bg-green-100 text-green-700"
-                                : "bg-yellow-100 text-yellow-800"
-                            }`}
-                          >
-                            {a.checkedIn ? (
-                              <CheckCircle size={12} />
-                            ) : (
-                              <div className="w-3 h-3 border-2 border-slate-300 rounded-full" />
-                            )}
-                            {a.checkedIn ? "CHECKED IN" : "PENDING"}
-                          </button>
-                        </td>
+                    {filteredAttendees.map((a) => {
+                      const hashgafa = getHashgafaGroup(a);
+                      return (
+                        <tr
+                          key={a.id}
+                          className="hover:bg-slate-50 transition-colors"
+                        >
+                          {/* Permanent Name Column */}
+                          <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
+                            <p className="font-bold text-slate-900">
+                              {a.firstName} {a.lastName}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {a.age}y • {a.gender}
+                            </p>
+                          </td>
 
-                        {/* Confirmed */}
-                        <td className="px-6 py-4 sticky left-[110px] bg-white group-hover:bg-slate-50 z-10 border-r border-slate-100">
-                          <input
-                            type="checkbox"
-                            checked={a.isConfirmed === "yes" || a.isConfirmed === true}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "isConfirmed",
-                                e.target.checked ? "yes" : "no"
-                              )
-                            }
-                          />
-                        </td>
+                          <td className="px-6 py-4">
+                            <span
+                              className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
+                            >
+                              {hashgafa.label.toUpperCase()}
+                            </span>
+                          </td>
 
-                        {/* Name */}
-                        <td className="px-6 py-4 sticky left-[110px] bg-white group-hover:bg-slate-50 z-10 border-r border-slate-100">
-                          <p className="font-bold text-slate-900 truncate max-w-[150px]">
-                            {a.firstName} {a.lastName}
-                          </p>
-                          <p className="text-xs text-slate-400">{a.age}y</p>
-                        </td>
+                          <td className="px-6 py-4">
+                            <button
+                              onClick={() => toggleCheckIn(a.id, a.checkedIn)}
+                              className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
+                                a.checkedIn
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-yellow-100 text-yellow-800"
+                              }`}
+                            >
+                              {a.checkedIn ? "CHECKED IN" : "PENDING"}
+                            </button>
+                          </td>
 
-                        {/* Gender */}
-                        <td className="px-6 py-4">
-                          <select
-                            value={a.gender}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "gender",
-                                e.target.value
-                              )
-                            }
-                            className={`bg-transparent font-semibold outline-none ${
-                              a.gender === "woman"
-                                ? "text-pink-600"
-                                : "text-blue-600"
-                            }`}
-                          >
-                            <option value="man">Man</option>
-                            <option value="woman">Woman</option>
-                          </select>
-                        </td>
+                          {/* Gender */}
+                          <td className="px-6 py-4">
+                            <select
+                              value={a.gender}
+                              onChange={(e) =>
+                                updateAttendeeField(a, "gender", e.target.value)
+                              }
+                              className={`bg-transparent font-semibold outline-none ${
+                                a.gender === "woman"
+                                  ? "text-pink-600"
+                                  : "text-blue-600"
+                              }`}
+                            >
+                              <option value="man">Man</option>
+                              <option value="woman">Woman</option>
+                            </select>
+                          </td>
 
-                        {/* Table Number */}
-                        <td className="px-6 py-4 text-slate-800 font-mono">
-                          {a.tableNumber || "-"}
-                        </td>
+                          {/* Table Number */}
+                          <td className="px-6 py-4 text-slate-800 font-mono">
+                            {a.tableNumber || "-"}
+                          </td>
 
-                        {/* Ethnicity */}
-                        <td className="px-6 py-4 text-slate-500">
-                          <select
-                            className="bg-transparent outline-none"
-                            value={a.ethnicity}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "ethnicity",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="Syrian / Egyptian / Lebanese">Syrian / Egyptian / Lebanese</option>
-                            <option value="Other Sephardic">Other Sephardic</option>
-                            <option value="Ashkenaz">Ashkenaz</option>
-                            <option value="Other">Other</option>
-                          </select>
-                        </td>
+                          {/* Ethnicity */}
+                          <td className="px-6 py-4 text-slate-500">
+                            <select
+                              className="bg-transparent outline-none"
+                              value={a.ethnicity}
+                              onChange={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "ethnicity",
+                                  e.target.value,
+                                )
+                              }
+                            >
+                              <option value="Syrian / Egyptian / Lebanese">
+                                Syrian / Egyptian / Lebanese
+                              </option>
+                              <option value="Other Sephardic">
+                                Other Sephardic
+                              </option>
+                              <option value="Ashkenaz">Ashkenaz</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </td>
 
-                        {/* Other background */}
-                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                          <textarea
-                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                            defaultValue={a.otherSpecify}
-                            onBlur={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "otherSpecify",
-                                e.target.value
-                              )
-                            }
-                          />
-                        </td>
+                          {/* Other background */}
+                          <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                            <textarea
+                              className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                              defaultValue={a.otherSpecify}
+                              onBlur={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "otherSpecify",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          </td>
 
-                        {/* Marital Status */}
-                        <td className="px-6 py-4 text-slate-500">
-                          <select
-                            className="bg-transparent outline-none"
-                            value={a.maritalStatus}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "maritalStatus",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="Single">Single</option>
-                            <option value="Divorced">Divorced</option>
-                            <option value="Widowed">Widowed</option>
-                          </select>
-                        </td>
+                          {/* Marital Status */}
+                          <td className="px-6 py-4 text-slate-500">
+                            <select
+                              className="bg-transparent outline-none"
+                              value={a.maritalStatus}
+                              onChange={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "maritalStatus",
+                                  e.target.value,
+                                )
+                              }
+                            >
+                              <option value="Single">Single</option>
+                              <option value="Divorced">Divorced</option>
+                              <option value="Widowed">Widowed</option>
+                            </select>
+                          </td>
 
-                        {/* Kohen */}
-                        <td className="px-6 py-4 text-slate-500 text-center">
-                          <input
-                            type="checkbox"
-                            checked={a.isKohen === "yes" || a.isKohen === true}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "isKohen",
-                                e.target.checked ? "yes" : "no"
-                              )
-                            }
-                          />
-                        </td>
+                          {/* Kohen */}
+                          <td className="px-6 py-4 text-slate-500 text-center">
+                            <input
+                              type="checkbox"
+                              checked={
+                                a.isKohen === "yes" || a.isKohen === true
+                              }
+                              onChange={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "isKohen",
+                                  e.target.checked ? "yes" : "no",
+                                )
+                              }
+                            />
+                          </td>
 
-                        {/* Open to Ethnicities (Array Edit) */}
-                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                          <textarea
-                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                            defaultValue={a.openToEthnicities?.join(", ")}
-                            onBlur={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "openToEthnicities",
-                                e.target.value.split(",").map((s) => s.trim())
-                              )
-                            }
-                          />
-                        </td>
+                          {/* Shomer Shabbat */}
+                          <td className="px-6 py-4 text-slate-500 text-center">
+                            <input
+                              type="checkbox"
+                              checked={
+                                a.isShomerShabbat === "yes" ||
+                                a.isShomerShabbat === true
+                              }
+                              onChange={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "isShomerShabbat",
+                                  e.target.checked ? "yes" : "no",
+                                )
+                              }
+                            />
+                          </td>
 
-                        {/* Open to Marital (Array Edit) */}
-                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                          <textarea
-                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                            defaultValue={a.openToMaritalStatus?.join(", ")}
-                            onBlur={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "openToMaritalStatus",
-                                e.target.value.split(",").map((s) => s.trim())
-                              )
-                            }
-                          />
-                        </td>
+                          {/* Shomer Kashrut */}
+                          <td className="px-6 py-4 text-slate-500 text-center">
+                            <input
+                              type="checkbox"
+                              checked={
+                                a.isShomerKashrut === "yes" ||
+                                a.isShomerKashrut === true
+                              }
+                              onChange={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "isShomerKashrut",
+                                  e.target.checked ? "yes" : "no",
+                                )
+                              }
+                            />
+                          </td>
 
-                        {/* Shomer Shabbat */}
-                        <td className="px-6 py-4 text-slate-500 text-center">
-                          <input
-                            type="checkbox"
-                            checked={
-                              a.isShomerShabbat === "yes" ||
-                              a.isShomerShabbat === true
-                            }
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "isShomerShabbat",
-                                e.target.checked ? "yes" : "no"
-                              )
-                            }
-                          />
-                        </td>
+                          {/* Wants Girl to cover her hair */}
+                          <td className="px-6 py-4 text-slate-500">
+                            <select
+                              className="bg-transparent outline-none"
+                              value={a.wantsCoveredHead}
+                              onChange={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "wantsCoveredHead",
+                                  e.target.value,
+                                )
+                              }
+                            >
+                              <option value="N/A">Not applicable</option>
+                              <option value="yes">Yes</option>
+                              <option value="no">No</option>
+                              <option value="noPreference">
+                                No preference
+                              </option>
+                            </select>
+                          </td>
 
-                        {/* Shomer Kashrut */}
-                        <td className="px-6 py-4 text-slate-500 text-center">
-                          <input
-                            type="checkbox"
-                            checked={
-                              a.isShomerKashrut === "yes" ||
-                              a.isShomerKashrut === true
-                            }
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "isShomerKashrut",
-                                e.target.checked ? "yes" : "no"
-                              )
-                            }
-                          />
-                        </td>
+                          {/* Girl to cover her hair */}
+                          <td className="px-6 py-4 text-slate-500">
+                            <select
+                              className="bg-transparent outline-none"
+                              value={a.hairCovering}
+                              onChange={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "hairCovering",
+                                  e.target.value,
+                                )
+                              }
+                            >
+                              <option value="N/A">Not applicable</option>
+                              <option value="willCoverHair">
+                                Will cover hair
+                              </option>
+                              <option value="openFlexible">
+                                Open / Flexible
+                              </option>
+                              <option value="notPlanning">
+                                Not planning to cover hair
+                              </option>
+                            </select>
+                          </td>
 
-                        {/* Wants Girl to cover her hair */}  
-                        <td className="px-6 py-4 text-slate-500">
-                          <select
-                            className="bg-transparent outline-none"
-                            value={a.wantsCoveredHead}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "wantsCoveredHead",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="N/A">Not applicable</option>
-                            <option value="yes">
-                              Yes
-                            </option>
-                            <option value="no">
-                              No
-                            </option>
-                            <option value="noPreference">
-                              No preference
-                            </option>
-                          </select>
-                        </td>
+                          {/* Dress Style */}
+                          <td className="px-6 py-4 text-slate-500">
+                            <select
+                              className="bg-transparent outline-none"
+                              value={a.dressStyle}
+                              onChange={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "dressStyle",
+                                  e.target.value,
+                                )
+                              }
+                            >
+                              <option value="N/A">Not applicable</option>
+                              <option value="skirtsOnly">Skirts only</option>
+                              <option value="skirtsPants">
+                                Skirts + pants
+                              </option>
+                            </select>
+                          </td>
 
-                        {/* Girl to cover her hair */}
-                        <td className="px-6 py-4 text-slate-500">
-                          <select
-                            className="bg-transparent outline-none"
-                            value={a.hairCovering}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "hairCovering",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="N/A">Not applicable</option>
-                            <option value="willCoverHair">
-                              Will cover hair
-                            </option>
-                            <option value="openFlexible">
-                              Open / Flexible
-                            </option>
-                            <option value="notPlanning">
-                              Not planning to cover hair
-                            </option>
-                          </select>
-                        </td>
+                          {/* Open to Marital (Array Edit) */}
+                          <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                            <textarea
+                              className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                              defaultValue={a.anythingElse}
+                              onBlur={(e) =>
+                                updateAttendeeField(
+                                  a,
+                                  "anythingElse",
+                                  e.target.value.map((s) => s.trim()),
+                                )
+                              }
+                            />
+                          </td>
 
-                        {/* Dress Style */}
-                        <td className="px-6 py-4 text-slate-500">
-                          <select
-                            className="bg-transparent outline-none"
-                            value={a.dressStyle}
-                            onChange={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "dressStyle",
-                                e.target.value
-                              )
-                            }
-                          >
-                            <option value="N/A">Not applicable</option>
-                            <option value="skirtsOnly">Skirts only</option>
-                            <option value="skirtsPants">Skirts + pants</option>
-                          </select>
-                        </td>
-
-                        {/* Open to Marital (Array Edit) */}
-                        <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                          <textarea
-                            className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                            defaultValue={a.anythingElse}
-                            onBlur={(e) =>
-                              updateAttendeeField(
-                                a.id,
-                                "anythingElse",
-                                e.target.value.map((s) => s.trim())
-                              )
-                            }
-                          />
-                        </td>
-
-                        {/* Actions */}
-                        <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
-                          <button
-                            onClick={() => deleteAttendee(a.id, a.name)}
-                            className="p-2 text-slate-300 hover:text-red-500 transition-all"
-                          >
-                            <UserMinus size={18} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                          {/* Actions */}
+                          <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
+                            <button
+                              onClick={() => deleteAttendee(a.id, a.name)}
+                              className="p-2 text-slate-300 hover:text-red-500 transition-all"
+                            >
+                              <UserMinus size={18} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

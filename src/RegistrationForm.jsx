@@ -8,19 +8,10 @@ import {
   where,
   doc,
   getDoc,
+  updateDoc
 } from "firebase/firestore";
 import { useSearchParams } from "react-router-dom";
 
-// const RELIGIOUS_SUBGROUPS = [
-//   "Chabad",
-//   "Chasidish",
-//   "Haredi",
-//   "Yeshivish",
-//   "Modern Yeshivish",
-//   "Modern Orthodox Machmir",
-//   "Heimish",
-//   "Out of the box",
-// ];
 const ETHNICITIES = [
   "Syrian / Egyptian / Lebanese",
   "Other Sephardic",
@@ -51,7 +42,7 @@ export default function RegistrationForm() {
     isKohen: "no",
     isShomerShabbat: "yes",
     isShomerKashrut: "yes",
-    wantsCoveredHead: "yes",
+    wantsCoveredHead: "N/A",
     hairCovering: "N/A",
     dressStyle: "N/A",
     maritalStatus: "",
@@ -96,26 +87,77 @@ export default function RegistrationForm() {
     setFormData({ ...formData, [field]: current });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!formData.eventId) return alert("Please select an event");
-    setLoading(true);
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  if (!formData.eventId) return alert("Please select an event");
+  setLoading(true);
 
-    try {
-      await addDoc(collection(db, "registrations"), {
-        ...formData,
-        age: calculateAge(formData.birthDate),
-        checkedIn: false,
-        timestamp: new Date(),
+  try {
+    // 1. Split the data
+    const { eventId, ...userProfile } = formData;
+    const userAge = calculateAge(formData.birthDate);
+
+    // 2. Find or Create the permanent User based on Email
+    // (You could also use Phone number as the unique key)
+    const userQuery = query(collection(db, "users"), where("email", "==", formData.email.toLowerCase().trim()));
+    const userSnap = await getDocs(userQuery);
+    
+    let internalUserId;
+
+    if (!userSnap.empty) {
+      // Existing User: Update their profile with latest info
+      internalUserId = userSnap.docs[0].id;
+      await updateDoc(doc(db, "users", internalUserId), {
+        ...userProfile,
+        age: userAge,
+        lastUpdated: new Date()
       });
-      alert("Registration successful!");
-      window.location.reload();
-    } catch (err) {
-      console.error(err);
-      alert("Error saving registration.");
+    } else {
+      // New User: Create permanent profile
+      const newUserRef = await addDoc(collection(db, "users"), {
+        ...userProfile,
+        age: userAge,
+        createdAt: new Date()
+      });
+      internalUserId = newUserRef.id;
     }
-    setLoading(false);
-  };
+
+    // 3. Check if they are already registered for THIS specific event
+    const regCheckQuery = query(
+      collection(db, "registrations"), 
+      where("eventId", "==", eventId),
+      where("userId", "==", internalUserId)
+    );
+    const regCheckSnap = await getDocs(regCheckQuery);
+
+    if (!regCheckSnap.empty) {
+      alert("You are already registered for this event!");
+      setLoading(false);
+      return;
+    }
+
+    // 4. Create the Event Registration
+    await addDoc(collection(db, "registrations"), {
+      userId: internalUserId,
+      eventId: eventId,
+      checkedIn: false,
+      tableNumber: null,
+      status: "registered", // e.g., "registered", "cancelled", "waitlist"
+      timestamp: new Date(),
+      // We store a few redundant fields for quick filtering in Admin without extra joins
+      gender: formData.gender, 
+      firstName: formData.firstName,
+      lastName: formData.lastName
+    });
+
+    alert("Registration successful!");
+    window.location.reload();
+  } catch (err) {
+    console.error("Registration Error:", err);
+    alert("Error saving registration.");
+  }
+  setLoading(false);
+};
 
   return (
     <div className="min-h-screen bg-white py-12 px-4">
@@ -528,7 +570,6 @@ export default function RegistrationForm() {
               <input
                 type="text"
                 placeholder="Anything else?"
-                required
                 className="w-full p-3 border rounded-lg mb-2"
                 onChange={(e) =>
                   setFormData({ ...formData, anythingElse: e.target.value })
