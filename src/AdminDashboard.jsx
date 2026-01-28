@@ -22,6 +22,7 @@ import {
   Square,
   UserMinus,
   CheckCircle,
+  ChevronDown,
 } from "lucide-react";
 
 export default function AdminDashboard() {
@@ -31,14 +32,20 @@ export default function AdminDashboard() {
   const [eventName, setEventName] = useState("");
   const [roundTime, setRoundTime] = useState(7);
   const [loading, setLoading] = useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [filters, setFilters] = useState({
     hashgafa: "all",
     minAgeMan: "",
     maxAgeMan: "",
     minAgeWoman: "",
     maxAgeWoman: "",
-    shomerShabbat: "all",
-    ethnicity: "all",
+    gender: "all", // Advanced
+    ethnicity: "all", // Advanced
+    maritalStatus: "all", // Advanced
+    isKohen: "all", // Advanced
+    shomerShabbat: "all", // Advanced
+    shomerKashrut: "all", // Advanced
+    dressStyle: "all", // Advanced
   });
 
   const getHashgafaGroup = (user) => {
@@ -80,33 +87,40 @@ export default function AdminDashboard() {
     };
   };
 
-  // Derived Data: Filtered List
-  const filteredAttendees = attendees.filter((a) => {
-    const h = getHashgafaGroup(a);
+const filteredAttendees = attendees.filter(a => {
+  const hashgafa = getHashgafaGroup(a);
 
-    // Hashgafa Filter
-    if (filters.hashgafa !== "all" && h.label !== filters.hashgafa)
-      return false;
+  // 1. Hashgafa (Main)
+  if (filters.hashgafa !== "all" && hashgafa.label !== filters.hashgafa) return false;
 
-    // Gender-based Age Filters
-    if (a.gender === "man") {
-      if (filters.minAgeMan && a.age < filters.minAgeMan) return false;
-      if (filters.maxAgeMan && a.age > filters.maxAgeMan) return false;
-    } else {
-      if (filters.minAgeWoman && a.age < filters.minAgeWoman) return false;
-      if (filters.maxAgeWoman && a.age > filters.maxAgeWoman) return false;
-    }
+  // 2. Gender-specific Ages (Main)
+  if (a.gender === "man") {
+    if (filters.minAgeMan && a.age < parseInt(filters.minAgeMan)) return false;
+    if (filters.maxAgeMan && a.age > parseInt(filters.maxAgeMan)) return false;
+  } else if (a.gender === "woman") {
+    if (filters.minAgeWoman && a.age < parseInt(filters.minAgeWoman)) return false;
+    if (filters.maxAgeWoman && a.age > parseInt(filters.maxAgeWoman)) return false;
+  }
 
-    // Shomer Shabbat Filter
-    if (filters.shomerShabbat !== "all") {
-      const isShomer =
-        a.isShomerShabbat === "yes" || a.isShomerShabbat === true;
-      if (filters.shomerShabbat === "yes" && !isShomer) return false;
-      if (filters.shomerShabbat === "no" && isShomer) return false;
-    }
+  // 3. Advanced Filters
+  if (filters.gender !== "all" && a.gender !== filters.gender) return false;
+  if (filters.ethnicity !== "all" && a.ethnicity !== filters.ethnicity) return false;
+  if (filters.maritalStatus !== "all" && a.maritalStatus !== filters.maritalStatus) return false;
+  if (filters.dressStyle !== "all" && a.dressStyle !== filters.dressStyle) return false;
 
-    return true;
-  });
+  // Boolean logic for Shomer Shabbat/Kashrut/Kohen
+  const checkBool = (filterVal, userVal) => {
+    if (filterVal === "all") return true;
+    const isTrue = userVal === "yes" || userVal === true;
+    return filterVal === "yes" ? isTrue : !isTrue;
+  };
+
+  if (!checkBool(filters.isKohen, a.isKohen)) return false;
+  if (!checkBool(filters.shomerShabbat, a.isShomerShabbat)) return false;
+  if (!checkBool(filters.shomerKashrut, a.isShomerKashrut)) return false;
+
+  return true;
+});
 
   const toggleStatus = async (id, currentStatus) => {
     try {
@@ -183,7 +197,7 @@ export default function AdminDashboard() {
       const newStatus = !currentStatus;
       const regRef = doc(db, "registrations", attendeeId);
 
-      // 1. Fetch current state to know gender and current participants
+      // 1. Fetch current state to find gender
       const attQuery = query(
         collection(db, "registrations"),
         where("eventId", "==", selectedEvent.id),
@@ -197,55 +211,35 @@ export default function AdminDashboard() {
       const prefix = gender === "woman" ? "G" : "B";
 
       if (!newStatus) {
-        // --- UNCHECKING: CLOSE THE GAPS ---
-        // 1. Set the target person to inactive
-        await updateDoc(regRef, { checkedIn: false, tableNumber: null });
-
-        // 2. Get all OTHER people of this gender who are still checked in
-        const remaining = allRegs
-          .filter(
-            (a) => a.gender === gender && a.checkedIn && a.id !== attendeeId,
-          )
-          .sort((a, b) => {
-            const numA = parseInt(a.tableNumber?.replace(prefix, "") || 0);
-            const numB = parseInt(b.tableNumber?.replace(prefix, "") || 0);
-            return numA - numB;
-          });
-
-        // 3. Re-assign them numbers 1 through N to close the gap
-        const shiftPromises = remaining.map((player, index) => {
-          const newTable = `${prefix}${index + 1}`;
-          // Only update if the number actually needs to change
-          if (player.tableNumber !== newTable) {
-            return updateDoc(doc(db, "registrations", player.id), {
-              tableNumber: newTable,
-            });
-          }
-          return null;
+        // --- UNCHECKING: STATIC REMOVAL ---
+        // We ONLY clear this specific person.
+        // This creates a "hole" (e.g., G1, gap, G3) so G3 doesn't have to move.
+        await updateDoc(regRef, {
+          checkedIn: false,
+          tableNumber: null,
         });
-
-        await Promise.all(shiftPromises.filter((p) => p !== null));
         return;
       }
 
-      // --- CHECKING IN: ADD TO END OR FILL GAP ---
-      // (Your existing logic for "Checking In" works fine as a "First Fit"
-      // but with the un-check logic above, there will rarely be gaps to fill!)
-
+      // --- CHECKING IN: FILL GAPS (FIRST FIT) ---
+      // 1. Find all numbers currently occupied by this gender
       const takenNumbers = allRegs
-        .filter((a) => a.gender === gender && a.checkedIn)
+        .filter((a) => a.gender === gender && a.checkedIn && a.tableNumber)
         .map((a) => parseInt(a.tableNumber.replace(prefix, "")))
         .sort((a, b) => a - b);
 
+      // 2. Find the lowest available number (starts at 1)
       let assignedNumber = 1;
       for (let i = 0; i < takenNumbers.length; i++) {
         if (takenNumbers[i] === assignedNumber) {
           assignedNumber++;
         } else if (takenNumbers[i] > assignedNumber) {
+          // We found a gap! Use this number.
           break;
         }
       }
 
+      // 3. Assign the permanent table number to the new arrival
       await updateDoc(regRef, {
         checkedIn: true,
         tableNumber: `${prefix}${assignedNumber}`,
@@ -627,36 +621,39 @@ export default function AdminDashboard() {
 
             {/* FILTER SYSTEM */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {/* Hashgafa */}
+              <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">
                     Hashgafa Group
                   </label>
                   <select
-                    className="w-full p-2 border rounded text-sm"
+                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50"
                     value={filters.hashgafa}
                     onChange={(e) =>
                       setFilters({ ...filters, hashgafa: e.target.value })
                     }
                   >
                     <option value="all">All Groups</option>
-                    <option value="Expected">Expected (Purple)</option>
+                    <option value="Expected">
+                      Hair-Covering Expected (Purple)
+                    </option>
                     <option value="Flexible">Flexible (Green)</option>
-                    <option value="None">No Hair Covering (Blue)</option>
+                    <option value="None">
+                      No Hair-Covering Expected (Blue)
+                    </option>
                   </select>
                 </div>
 
-                {/* Age Men */}
                 <div>
                   <label className="text-[10px] font-bold text-blue-600 uppercase mb-2 block">
-                    Men Age Range
+                    Men's Age Range
                   </label>
                   <div className="flex gap-2">
                     <input
                       type="number"
                       placeholder="Min"
-                      className="w-1/2 p-2 border rounded text-sm"
+                      className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                      value={filters.minAgeMan}
                       onChange={(e) =>
                         setFilters({ ...filters, minAgeMan: e.target.value })
                       }
@@ -664,7 +661,8 @@ export default function AdminDashboard() {
                     <input
                       type="number"
                       placeholder="Max"
-                      className="w-1/2 p-2 border rounded text-sm"
+                      className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                      value={filters.maxAgeMan}
                       onChange={(e) =>
                         setFilters({ ...filters, maxAgeMan: e.target.value })
                       }
@@ -672,16 +670,28 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
-                {/* Age Women */}
                 <div>
-                  <label className="text-[10px] font-bold text-pink-600 uppercase mb-2 block">
-                    Women Age Range
-                  </label>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-[10px] font-bold text-pink-600 uppercase block">
+                      Women's Age Range
+                    </label>
+                    <button
+                      onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+                      className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
+                    >
+                      {isAdvancedOpen ? "Close Advanced" : "Advanced Filters"}
+                      <ChevronDown
+                        size={14}
+                        className={`transition-transform ${isAdvancedOpen ? "rotate-180" : ""}`}
+                      />
+                    </button>
+                  </div>
                   <div className="flex gap-2">
                     <input
                       type="number"
                       placeholder="Min"
-                      className="w-1/2 p-2 border rounded text-sm"
+                      className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                      value={filters.minAgeWoman}
                       onChange={(e) =>
                         setFilters({ ...filters, minAgeWoman: e.target.value })
                       }
@@ -689,31 +699,118 @@ export default function AdminDashboard() {
                     <input
                       type="number"
                       placeholder="Max"
-                      className="w-1/2 p-2 border rounded text-sm"
+                      className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                      value={filters.maxAgeWoman}
                       onChange={(e) =>
                         setFilters({ ...filters, maxAgeWoman: e.target.value })
                       }
                     />
                   </div>
                 </div>
-
-                {/* Shabbat */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">
-                    Shomer Shabbat
-                  </label>
-                  <select
-                    className="w-full p-2 border rounded text-sm"
-                    onChange={(e) =>
-                      setFilters({ ...filters, shomerShabbat: e.target.value })
-                    }
-                  >
-                    <option value="all">Any</option>
-                    <option value="yes">Yes</option>
-                    <option value="no">No</option>
-                  </select>
-                </div>
               </div>
+
+              {/* ADVANCED FILTERS (Collapsible) */}
+              {isAdvancedOpen && (
+                <div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-slate-50/50 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                  {/* Gender */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                      Gender
+                    </label>
+                    <select
+                      className="w-full p-2 border rounded text-xs"
+                      value={filters.gender}
+                      onChange={(e) =>
+                        setFilters({ ...filters, gender: e.target.value })
+                      }
+                    >
+                      <option value="all">All</option>
+                      <option value="man">Men</option>
+                      <option value="woman">Women</option>
+                    </select>
+                  </div>
+
+                  {/* Ethnicity */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                      Ethnicity
+                    </label>
+                    <select
+                      className="w-full p-2 border rounded text-xs"
+                      value={filters.ethnicity}
+                      onChange={(e) =>
+                        setFilters({ ...filters, ethnicity: e.target.value })
+                      }
+                    >
+                      <option value="all">Any</option>
+                      <option value="Syrian / Egyptian / Lebanese">
+                        S/E/L
+                      </option>
+                      <option value="Other Sephardic">Other Sephardic</option>
+                      <option value="Ashkenaz">Ashkenaz</option>
+                    </select>
+                  </div>
+
+                  {/* Marital */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                      Marital
+                    </label>
+                    <select
+                      className="w-full p-2 border rounded text-xs"
+                      value={filters.maritalStatus}
+                      onChange={(e) =>
+                        setFilters({
+                          ...filters,
+                          maritalStatus: e.target.value,
+                        })
+                      }
+                    >
+                      <option value="all">Any</option>
+                      <option value="Single">Single</option>
+                      <option value="Divorced">Divorced</option>
+                    </select>
+                  </div>
+
+                  {/* Boolean Filters (Shabbat, Kashrut, Kohen) */}
+                  {["isKohen", "shomerShabbat", "shomerKashrut"].map((key) => (
+                    <div key={key}>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                        {key.replace("is", "").replace("shomer", "Shomer ")}
+                      </label>
+                      <select
+                        className="w-full p-2 border rounded text-xs"
+                        value={filters[key]}
+                        onChange={(e) =>
+                          setFilters({ ...filters, [key]: e.target.value })
+                        }
+                      >
+                        <option value="all">Any</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    </div>
+                  ))}
+
+                  {/* Dress Style */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                      Dress Style
+                    </label>
+                    <select
+                      className="w-full p-2 border rounded text-xs"
+                      value={filters.dressStyle}
+                      onChange={(e) =>
+                        setFilters({ ...filters, dressStyle: e.target.value })
+                      }
+                    >
+                      <option value="all">Any</option>
+                      <option value="skirtsOnly">Skirts Only</option>
+                      <option value="skirtsPants">Skirts + Pants</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* TABLE SECTION */}

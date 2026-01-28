@@ -38,7 +38,6 @@ export default function RegistrationForm() {
     birthDate: "",
     ethnicity: "",
     otherSpecify: "",
-    openToEthnicities: [],
     isKohen: "no",
     isShomerShabbat: "yes",
     isShomerKashrut: "yes",
@@ -46,7 +45,6 @@ export default function RegistrationForm() {
     hairCovering: "N/A",
     dressStyle: "N/A",
     maritalStatus: "",
-    openToMaritalStatus: [],
     anythingElse: "",
   });
 
