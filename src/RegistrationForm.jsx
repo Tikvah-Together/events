@@ -140,7 +140,8 @@ const handleSubmit = async (e) => {
       eventId: eventId,
       checkedIn: false,
       tableNumber: null,
-      status: "registered", // e.g., "registered", "cancelled", "waitlist"
+      status: "waitlist", // e.g., invited, confirmed, declined, waitlist, no response
+      groupId: "Group 1", // Default group assignment
       timestamp: new Date(),
       // We store a few redundant fields for quick filtering in Admin without extra joins
       gender: formData.gender, 
@@ -361,7 +362,6 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="isShomerShabbat"
                     value="yes"
-                    defaultChecked
                     onChange={() =>
                       setFormData({ ...formData, isShomerShabbat: "yes" })
                     }
@@ -392,7 +392,6 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="isShomerKashrut"
                     value="yes"
-                    defaultChecked
                     onChange={() =>
                       setFormData({ ...formData, isShomerKashrut: "yes" })
                     }
@@ -505,7 +504,6 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="kohen"
                     value="no"
-                    defaultChecked
                     onChange={() => setFormData({ ...formData, isKohen: "no" })}
                   />{" "}
                   No
@@ -526,7 +524,6 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="coverHead"
                     value="yes"
-                    defaultChecked
                     onChange={() =>
                       setFormData({ ...formData, wantsCoveredHead: "yes" })
                     }
@@ -588,89 +585,3 @@ const handleSubmit = async (e) => {
     </div>
   );
 }
-
-          {/* Parents Background, not needed for now */}
-          {/* <section>
-          <label className="block font-semibold mb-2">Your parents are:</label>
-          <select required className="w-full p-3 border rounded-lg" onChange={(e) => setFormData({...formData, parents: e.target.value})}>
-            <option value="">Select</option>
-            <option>Both Jewish</option>
-            <option>Mom is Jewish, Dad is not</option>
-            <option>Dad is Jewish, Mom is not</option>
-            <option>Neither</option>
-          </select>
-        </section> */}
-
-          {/* Religious Level */}
-          {/* <section>
-            <label className="block font-semibold mb-2">
-              Which best describes you?
-            </label>
-            <select
-              required
-              className="w-full p-3 border rounded-lg"
-              onChange={(e) =>
-                setFormData({ ...formData, religiousLevel: e.target.value })
-              }
-            >
-              <option value="">Select</option>
-              {[
-                "Orthodox",
-                "Modern",
-                "Traditional",
-                "Conservative",
-                "Reform",
-                "Reconstructionist",
-                "Just Jewish",
-                "Spiritual",
-              ].map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          </section> */}
-
-          {/* Religious Subgroup (Multi) */}
-          {/* <section>
-            <label className="block font-semibold mb-2">
-              Community / Hashkafa
-            </label>
-            <select
-              required
-              className="w-full p-3 border rounded-lg mb-2"
-              onChange={(e) =>
-                setFormData({ ...formData, subGroup: e.target.value })
-              }
-            >
-              <option value="">Select yours...</option>
-              {RELIGIOUS_SUBGROUPS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-            <label className="block text-sm text-gray-600 mb-2 italic">
-              I am open to date someone who is:
-            </label>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              {RELIGIOUS_SUBGROUPS.map((opt) => (
-                <label
-                  key={opt}
-                  className="flex items-center gap-2 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    onChange={() =>
-                      handleCheckbox(
-                        formData.openToSubGroups,
-                        opt,
-                        "openToSubGroups"
-                      )
-                    }
-                  />
-                  {opt}
-                </label>
-              ))}
-            </div>
-          </section> */}
