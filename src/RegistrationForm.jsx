@@ -361,7 +361,6 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="isShomerShabbat"
                     value="yes"
-                    defaultChecked
                     onChange={() =>
                       setFormData({ ...formData, isShomerShabbat: "yes" })
                     }
@@ -392,7 +391,6 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="isShomerKashrut"
                     value="yes"
-                    defaultChecked
                     onChange={() =>
                       setFormData({ ...formData, isShomerKashrut: "yes" })
                     }
@@ -505,7 +503,6 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="kohen"
                     value="no"
-                    defaultChecked
                     onChange={() => setFormData({ ...formData, isKohen: "no" })}
                   />{" "}
                   No
@@ -526,7 +523,6 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="coverHead"
                     value="yes"
-                    defaultChecked
                     onChange={() =>
                       setFormData({ ...formData, wantsCoveredHead: "yes" })
                     }

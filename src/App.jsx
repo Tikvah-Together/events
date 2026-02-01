@@ -70,8 +70,8 @@ function Home() {
 function App() {
   return (
     <Router>
-      <div className="min-h-screen bg-white">
-        <nav className="border-b border-slate-100 py-6">
+      <div className="min-h-screen bg-white flex flex-col">
+        <nav className="border-b border-slate-100 py-6 shrink-0">
           <div className="max-w-6xl mx-auto px-6 flex justify-between items-center">
             <Link
               to="/"
@@ -105,7 +105,7 @@ function App() {
           </div>
         </nav>
 
-        <main className="max-w-auto mx-auto">
+        <main className="flex-1">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/register" element={<RegistrationForm />} />
@@ -141,9 +141,9 @@ function App() {
           </Routes>
         </main>
 
-        <footer className="mt-20 py-10 border-t border-slate-50 text-center text-slate-400 text-sm">
-          © {new Date().getFullYear()} Tikvah Together.
-        </footer>
+        <footer className="py-8 border-t border-slate-200 text-center text-slate-400 text-sm shrink-0 bg-white">
+        © {new Date().getFullYear()} Tikvah Together.
+      </footer>
       </div>
     </Router>
   );

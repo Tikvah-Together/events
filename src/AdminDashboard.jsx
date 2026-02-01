@@ -4,7 +4,6 @@ import {
   collection,
   addDoc,
   documentId,
-  getDoc,
   getDocs,
   doc,
   updateDoc,
@@ -21,7 +20,6 @@ import {
   Play,
   Square,
   UserMinus,
-  CheckCircle,
   ChevronDown,
 } from "lucide-react";
 
@@ -32,6 +30,12 @@ export default function AdminDashboard() {
   const [eventName, setEventName] = useState("");
   const [roundTime, setRoundTime] = useState(7);
   const [loading, setLoading] = useState(false);
+  const [allRegistrations, setAllRegistrations] = useState([]); // All registrations for history/duplicate checks
+  const [activeTab, setActiveTab] = useState("events"); // "events" or "master"
+  const [masterUsers, setMasterUsers] = useState([]); // The full singles database
+  const [selectedUserIds, setSelectedUserIds] = useState([]); // For checkboxes
+  const [targetEventId, setTargetEventId] = useState(""); // For "Add to Event" dropdown
+  const [masterFilter, setMasterFilter] = useState("all"); // everyone, in-event, not-in-event
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [filters, setFilters] = useState({
     hashgafa: "all",
@@ -87,40 +91,51 @@ export default function AdminDashboard() {
     };
   };
 
-const filteredAttendees = attendees.filter(a => {
-  const hashgafa = getHashgafaGroup(a);
+  const filteredAttendees = attendees.filter((a) => {
+    const hashgafa = getHashgafaGroup(a);
 
-  // 1. Hashgafa (Main)
-  if (filters.hashgafa !== "all" && hashgafa.label !== filters.hashgafa) return false;
+    // 1. Hashgafa (Main)
+    if (filters.hashgafa !== "all" && hashgafa.label !== filters.hashgafa)
+      return false;
 
-  // 2. Gender-specific Ages (Main)
-  if (a.gender === "man") {
-    if (filters.minAgeMan && a.age < parseInt(filters.minAgeMan)) return false;
-    if (filters.maxAgeMan && a.age > parseInt(filters.maxAgeMan)) return false;
-  } else if (a.gender === "woman") {
-    if (filters.minAgeWoman && a.age < parseInt(filters.minAgeWoman)) return false;
-    if (filters.maxAgeWoman && a.age > parseInt(filters.maxAgeWoman)) return false;
-  }
+    // 2. Gender-specific Ages (Main)
+    if (a.gender === "man") {
+      if (filters.minAgeMan && a.age < parseInt(filters.minAgeMan))
+        return false;
+      if (filters.maxAgeMan && a.age > parseInt(filters.maxAgeMan))
+        return false;
+    } else if (a.gender === "woman") {
+      if (filters.minAgeWoman && a.age < parseInt(filters.minAgeWoman))
+        return false;
+      if (filters.maxAgeWoman && a.age > parseInt(filters.maxAgeWoman))
+        return false;
+    }
 
-  // 3. Advanced Filters
-  if (filters.gender !== "all" && a.gender !== filters.gender) return false;
-  if (filters.ethnicity !== "all" && a.ethnicity !== filters.ethnicity) return false;
-  if (filters.maritalStatus !== "all" && a.maritalStatus !== filters.maritalStatus) return false;
-  if (filters.dressStyle !== "all" && a.dressStyle !== filters.dressStyle) return false;
+    // 3. Advanced Filters
+    if (filters.gender !== "all" && a.gender !== filters.gender) return false;
+    if (filters.ethnicity !== "all" && a.ethnicity !== filters.ethnicity)
+      return false;
+    if (
+      filters.maritalStatus !== "all" &&
+      a.maritalStatus !== filters.maritalStatus
+    )
+      return false;
+    if (filters.dressStyle !== "all" && a.dressStyle !== filters.dressStyle)
+      return false;
 
-  // Boolean logic for Shomer Shabbat/Kashrut/Kohen
-  const checkBool = (filterVal, userVal) => {
-    if (filterVal === "all") return true;
-    const isTrue = userVal === "yes" || userVal === true;
-    return filterVal === "yes" ? isTrue : !isTrue;
-  };
+    // Boolean logic for Shomer Shabbat/Kashrut/Kohen
+    const checkBool = (filterVal, userVal) => {
+      if (filterVal === "all") return true;
+      const isTrue = userVal === "yes" || userVal === true;
+      return filterVal === "yes" ? isTrue : !isTrue;
+    };
 
-  if (!checkBool(filters.isKohen, a.isKohen)) return false;
-  if (!checkBool(filters.shomerShabbat, a.isShomerShabbat)) return false;
-  if (!checkBool(filters.shomerKashrut, a.isShomerKashrut)) return false;
+    if (!checkBool(filters.isKohen, a.isKohen)) return false;
+    if (!checkBool(filters.shomerShabbat, a.isShomerShabbat)) return false;
+    if (!checkBool(filters.shomerKashrut, a.isShomerKashrut)) return false;
 
-  return true;
-});
+    return true;
+  });
 
   const toggleStatus = async (id, currentStatus) => {
     try {
@@ -265,6 +280,67 @@ const filteredAttendees = attendees.filter(a => {
 
     navigator.clipboard.writeText(registrationUrl);
     alert("Link copied to clipboard!");
+  };
+
+  const addSelectedToEvent = async () => {
+    if (!targetEventId || selectedUserIds.length === 0) return;
+
+    const targetEvent = events.find((e) => e.id === targetEventId);
+    setLoading(true);
+
+    try {
+      const promises = selectedUserIds.map(async (userId) => {
+        // Final Database Safety Check:
+        const exists = allRegistrations.find(
+          (r) => r.userId === userId && r.eventId === targetEventId,
+        );
+        if (exists) return;
+
+        return addDoc(collection(db, "registrations"), {
+          userId,
+          eventId: targetEventId,
+          eventName: targetEvent?.name || "Unknown Event",
+          groupId: "Group 1",
+          confirmationStatus: "Invited",
+          checkedIn: false,
+          createdAt: new Date(),
+        });
+      });
+
+      await Promise.all(promises);
+      setSelectedUserIds([]);
+      alert(`Successfully added to ${targetEvent?.name}`);
+    } catch (err) {
+      console.error(err);
+      alert("Error adding users.");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "registrations"), (snap) => {
+      setAllRegistrations(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    // Fetch all users for the Master List
+    const unsubscribe = onSnapshot(collection(db, "users"), (snap) => {
+      const users = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setMasterUsers(users);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Helper to get a user's event history
+  const getUserHistory = (userId) => {
+    // You'll need a global registrations state or fetch this once
+    // For now, we can filter against the 'events' we already have in state
+    // and check if a registration exists for them (logic simplified for brevity)
+    return events.filter((ev) =>
+      attendees.some((a) => a.userId === userId && a.eventId === ev.id),
+    );
   };
 
   // 1. Fetch all events in real-time
@@ -426,706 +502,934 @@ const filteredAttendees = attendees.filter(a => {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-slate-50 overflow-hidden">
-      {/* SIDEBAR: Event List */}
-      <div
-        className={`${
-          selectedEvent ? "hidden md:flex" : "flex"
-        } w-full md:w-auto bg-white border-r border-slate-200 p-6 flex-col h-full`}
-      >
-        <h2 className="text-xl font-bold text-blue-900 mb-6">
+    <div className="flex flex-col bg-slate-50">
+      {/* TAB NAVIGATION */}
+      <div className="flex bg-white border-b border-slate-200 px-6 shrink-0">
+        <button
+          onClick={() => setActiveTab("events")}
+          className={`px-6 py-4 font-bold text-sm ${activeTab === "events" ? "border-b-2 border-blue-900 text-blue-900" : "text-slate-400"}`}
+        >
           Events Management
-        </h2>
-
-        <div className="space-y-4 mb-8">
-          <input
-            className="w-full p-2 border border-slate-200 rounded text-sm focus:ring-2 focus:ring-blue-900 outline-none"
-            placeholder="New Event Name..."
-            value={eventName}
-            onChange={(e) => setEventName(e.target.value)}
-          />
-
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-slate-400 uppercase">
-              Event Date & Time
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="date"
-                className="flex-1 p-2 border border-slate-200 rounded text-xs outline-none"
-                value={eventDate}
-                onChange={(e) => setEventDate(e.target.value)}
-              />
-              <input
-                type="time"
-                className="w-24 p-2 border border-slate-200 rounded text-xs outline-none"
-                value={eventTime}
-                onChange={(e) => setEventTime(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-medium">
-              Minute(s) per round:
-            </span>
-            <input
-              type="number"
-              className="w-16 p-2 border border-slate-200 rounded text-sm outline-none"
-              value={roundTime}
-              onChange={(e) => setRoundTime(e.target.value)}
-            />
-          </div>
-          <button
-            onClick={createEvent}
-            className="w-full bg-blue-900 text-white py-2 rounded font-semibold flex items-center justify-center gap-2 hover:bg-blue-800 transition shadow-sm"
-          >
-            <Plus size={18} /> Create Event
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto space-y-2">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
-            History
-          </p>
-          {events.map((ev) => (
-            <div
-              key={ev.id}
-              onClick={() => setSelectedEvent(ev)}
-              className={`p-3 rounded-lg cursor-pointer transition-all border ${
-                selectedEvent?.id === ev.id
-                  ? "bg-blue-50 border-blue-200"
-                  : "bg-white border-transparent hover:bg-slate-50"
-              }`}
-            >
-              <div className="flex justify-between items-start">
-                <span className="font-semibold text-slate-800 text-sm truncate">
-                  {ev.name}
-                </span>
-                {ev.active && (
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse mt-1"></span>
-                )}
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                {ev.roundTime} minute(s) per round
-              </p>
-            </div>
-          ))}
-        </div>
+        </button>
+        <button
+          onClick={() => setActiveTab("master")}
+          className={`px-6 py-4 font-bold text-sm ${activeTab === "master" ? "border-b-2 border-blue-900 text-blue-900" : "text-slate-400"}`}
+        >
+          Master Singles List
+        </button>
       </div>
 
-      {/* MAIN CONTENT: Event Details */}
-      <div className="flex-1 p-4 overflow-auto">
-        {selectedEvent ? (
-          <div className="w-full max-w-7xl mx-auto">
-            <button
-              onClick={() => setSelectedEvent(null)}
-              className="md:hidden mb-4 text-blue-600 font-bold flex items-center gap-2"
-            >
-              ← Back to Events
-            </button>
-            {/* HEADER SECTION */}
-            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-6 mb-10 pb-6 border-b border-slate-200">
+      <div className="flex flex-1 overflow-hidden">
+        {activeTab === "master" ? (
+          /* MASTER LIST UI */
+          <div className="flex-1 p-8 overflow-auto">
+            <header className="flex justify-between items-end mb-8">
               <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-2xl md:text-4xl font-bold text-slate-900">
-                    {selectedEvent.name}
-                  </h1>
-                  <span
-                    className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase transition-colors duration-300 ${
-                      selectedEvent.active
-                        ? "bg-green-500 text-white animate-pulse"
-                        : "bg-slate-200 text-slate-600"
-                    }`}
-                  >
-                    {selectedEvent.active ? "LIVE" : "DRAFT"}
-                  </span>
-                </div>
-                <div className="mt-3 flex flex-wrap md:flex-nowrap items-center gap-2 w-full md:w-auto group">
-                  <div
-                    onClick={() => copyRegistrationLink(selectedEvent.id)}
-                    className="flex items-center gap-2 px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-100 cursor-pointer hover:bg-blue-100 transition-all shadow-sm"
-                  >
-                    <span className="text-[10px] font-bold uppercase tracking-tight">
-                      Registration Link:
-                    </span>
-                    <code className="text-[10px] md:text-xs font-mono break-all md:break-normal">
-                      {window.location.origin}/register?eventId=
-                      {selectedEvent.id}
-                    </code>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="lucide lucide-copy"
-                    >
-                      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                    </svg>
-                  </div>
-                  <span className="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity italic">
-                    Click to copy URL
-                  </span>
-                </div>
-                <p className="text-sm text-slate-500 mt-1">
-                  Round Time: {selectedEvent.roundTime} minute(s)
-                </p>
-                <p className="text-slate-400 text-sm mt-2 font-mono">
-                  ID: {selectedEvent.id}
-                </p>
-                <p className="text-slate-400 text-sm mt-2 font-mono">
-                  Event Date & Time:{" "}
-                  {selectedEvent.scheduledAt
-                    ? selectedEvent.scheduledAt.toDate().toLocaleString()
-                    : "Not scheduled"}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
-                <button
-                  onClick={() =>
-                    toggleStatus(selectedEvent.id, selectedEvent.active)
-                  }
-                  className={`px-6 py-2 rounded-md font-bold flex items-center gap-2 transition-all duration-200 shadow-sm border ${
-                    selectedEvent.active
-                      ? "bg-white text-orange-600 border-orange-200 hover:bg-orange-50"
-                      : "bg-blue-900 text-white border-blue-900 hover:bg-blue-800"
-                  }`}
-                >
-                  {selectedEvent.active ? (
-                    <>
-                      <Square size={16} fill="currentColor" /> Stop Event
-                    </>
-                  ) : (
-                    <>
-                      <Play size={16} fill="currentColor" /> Launch Event
-                    </>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => deleteEvent(selectedEvent.id)}
-                  className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-md transition"
-                  title="Delete Event"
-                >
-                  <Trash2 size={22} />
-                </button>
-              </div>
-            </div>
-
-            {/* FILTER SYSTEM */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6">
-              <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">
-                    Hashgafa Group
-                  </label>
+                <h1 className="text-3xl font-bold">Master Singles Database</h1>
+                <div className="flex gap-4 mt-4">
                   <select
-                    className="w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50"
-                    value={filters.hashgafa}
-                    onChange={(e) =>
-                      setFilters({ ...filters, hashgafa: e.target.value })
-                    }
+                    className="p-2 border rounded text-sm"
+                    value={masterFilter}
+                    onChange={(e) => setMasterFilter(e.target.value)}
                   >
-                    <option value="all">All Groups</option>
-                    <option value="Expected">
-                      Hair-Covering Expected (Purple)
-                    </option>
-                    <option value="Flexible">Flexible (Green)</option>
-                    <option value="None">
-                      No Hair-Covering Expected (Blue)
-                    </option>
+                    <option value="all">Show Everyone</option>
+                    <option value="notInEvent">Not in target event</option>
                   </select>
                 </div>
+              </div>
 
+              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex gap-4 items-end">
                 <div>
-                  <label className="text-[10px] font-bold text-blue-600 uppercase mb-2 block">
-                    Men's Age Range
+                  <label className="text-[10px] font-bold text-blue-900 uppercase block mb-1">
+                    Target Event
+                  </label>
+                  <select
+                    className="p-2 rounded border text-sm"
+                    value={targetEventId}
+                    onChange={(e) => setTargetEventId(e.target.value)}
+                  >
+                    <option value="">Select an event...</option>
+                    {events.map((ev) => (
+                      <option key={ev.id} value={ev.id}>
+                        {ev.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={addSelectedToEvent}
+                  disabled={!targetEventId || selectedUserIds.length === 0}
+                  className="bg-blue-900 text-white px-4 py-2 rounded font-bold disabled:opacity-50"
+                >
+                  Add {selectedUserIds.length} to Event
+                </button>
+              </div>
+            </header>
+
+            <table className="w-full bg-white rounded-xl shadow-sm border border-slate-200 border-collapse overflow-hidden">
+              <thead>
+                <tr className="bg-slate-50 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-200">
+                  <th className="p-4 text-center w-16">Select</th>
+                  <th className="p-4 text-left">Singles Details</th>
+                  <th className="p-4 text-left">Event History</th>
+                </tr>
+              </thead>
+              <tbody>
+                {masterUsers.map((user) => {
+                  // 1. IMPROVED DUPLICATE PREVENTION: Check against the GLOBAL registration list
+                  const alreadyInEvent = allRegistrations.some(
+                    (reg) =>
+                      reg.userId === user.id && reg.eventId === targetEventId,
+                  );
+
+                  // 2. FETCH REAL HISTORY: Find every event this user has ever registered for
+                  const userHistory = events.filter((ev) =>
+                    allRegistrations.some(
+                      (reg) => reg.userId === user.id && reg.eventId === ev.id,
+                    ),
+                  );
+
+                  if (masterFilter === "notInEvent" && alreadyInEvent)
+                    return null;
+
+                  return (
+                    <tr
+                      key={user.id}
+                      className={`border-t transition-colors ${alreadyInEvent ? "bg-slate-50 opacity-50" : "hover:bg-slate-50"}`}
+                    >
+                      <td className="p-4 text-center">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-blue-900"
+                          disabled={alreadyInEvent || !targetEventId} // Disable if no event selected or already in
+                          checked={selectedUserIds.includes(user.id)}
+                          onChange={(e) => {
+                            if (e.target.checked)
+                              setSelectedUserIds([...selectedUserIds, user.id]);
+                            else
+                              setSelectedUserIds(
+                                selectedUserIds.filter((id) => id !== user.id),
+                              );
+                          }}
+                        />
+                      </td>
+                      <td className="p-4">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-slate-900">
+                            {user.firstName} {user.lastName}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {user.age} years old • {user.gender}
+                          </span>
+                          {alreadyInEvent && (
+                            <span className="mt-1 text-[9px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded w-fit">
+                              ALREADY IN SELECTED EVENT
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex flex-wrap gap-1">
+                          {userHistory.length > 0 ? (
+                            userHistory.map((ev) => (
+                              <span
+                                key={ev.id}
+                                className={`px-2 py-1 rounded text-[10px] font-medium ${ev.active ? "bg-green-100 text-green-700 border border-green-200" : "bg-slate-100 text-slate-500"}`}
+                              >
+                                {ev.name}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-slate-300 italic text-xs">
+                              No history
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="flex flex-col md:flex-row h-screen bg-slate-50 overflow-hidden">
+            {/* SIDEBAR: Event List */}
+            <div
+              className={`${
+                selectedEvent ? "hidden md:flex" : "flex"
+              } w-full md:w-auto bg-white border-r border-slate-200 p-6 flex-col h-full`}
+            >
+              <h2 className="text-xl font-bold text-blue-900 mb-6">
+                Events Management
+              </h2>
+
+              <div className="space-y-4 mb-8">
+                <input
+                  className="w-full p-2 border border-slate-200 rounded text-sm focus:ring-2 focus:ring-blue-900 outline-none"
+                  placeholder="New Event Name..."
+                  value={eventName}
+                  onChange={(e) => setEventName(e.target.value)}
+                />
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">
+                    Event Date & Time
                   </label>
                   <div className="flex gap-2">
                     <input
-                      type="number"
-                      placeholder="Min"
-                      className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
-                      value={filters.minAgeMan}
-                      onChange={(e) =>
-                        setFilters({ ...filters, minAgeMan: e.target.value })
-                      }
+                      type="date"
+                      className="flex-1 p-2 border border-slate-200 rounded text-xs outline-none"
+                      value={eventDate}
+                      onChange={(e) => setEventDate(e.target.value)}
                     />
                     <input
-                      type="number"
-                      placeholder="Max"
-                      className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
-                      value={filters.maxAgeMan}
-                      onChange={(e) =>
-                        setFilters({ ...filters, maxAgeMan: e.target.value })
-                      }
+                      type="time"
+                      className="w-24 p-2 border border-slate-200 rounded text-xs outline-none"
+                      value={eventTime}
+                      onChange={(e) => setEventTime(e.target.value)}
                     />
                   </div>
                 </div>
 
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="text-[10px] font-bold text-pink-600 uppercase block">
-                      Women's Age Range
-                    </label>
-                    <button
-                      onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
-                      className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
-                    >
-                      {isAdvancedOpen ? "Close Advanced" : "Advanced Filters"}
-                      <ChevronDown
-                        size={14}
-                        className={`transition-transform ${isAdvancedOpen ? "rotate-180" : ""}`}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      placeholder="Min"
-                      className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
-                      value={filters.minAgeWoman}
-                      onChange={(e) =>
-                        setFilters({ ...filters, minAgeWoman: e.target.value })
-                      }
-                    />
-                    <input
-                      type="number"
-                      placeholder="Max"
-                      className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
-                      value={filters.maxAgeWoman}
-                      onChange={(e) =>
-                        setFilters({ ...filters, maxAgeWoman: e.target.value })
-                      }
-                    />
-                  </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 font-medium">
+                    Minute(s) per round:
+                  </span>
+                  <input
+                    type="number"
+                    className="w-16 p-2 border border-slate-200 rounded text-sm outline-none"
+                    value={roundTime}
+                    onChange={(e) => setRoundTime(e.target.value)}
+                  />
                 </div>
+                <button
+                  onClick={createEvent}
+                  className="w-full bg-blue-900 text-white py-2 rounded font-semibold flex items-center justify-center gap-2 hover:bg-blue-800 transition shadow-sm"
+                >
+                  <Plus size={18} /> Create Event
+                </button>
               </div>
 
-              {/* ADVANCED FILTERS (Collapsible) */}
-              {isAdvancedOpen && (
-                <div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-slate-50/50 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-                  {/* Gender */}
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                      Gender
-                    </label>
-                    <select
-                      className="w-full p-2 border rounded text-xs"
-                      value={filters.gender}
-                      onChange={(e) =>
-                        setFilters({ ...filters, gender: e.target.value })
-                      }
-                    >
-                      <option value="all">All</option>
-                      <option value="man">Men</option>
-                      <option value="woman">Women</option>
-                    </select>
-                  </div>
-
-                  {/* Ethnicity */}
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                      Ethnicity
-                    </label>
-                    <select
-                      className="w-full p-2 border rounded text-xs"
-                      value={filters.ethnicity}
-                      onChange={(e) =>
-                        setFilters({ ...filters, ethnicity: e.target.value })
-                      }
-                    >
-                      <option value="all">Any</option>
-                      <option value="Syrian / Egyptian / Lebanese">
-                        S/E/L
-                      </option>
-                      <option value="Other Sephardic">Other Sephardic</option>
-                      <option value="Ashkenaz">Ashkenaz</option>
-                    </select>
-                  </div>
-
-                  {/* Marital */}
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                      Marital
-                    </label>
-                    <select
-                      className="w-full p-2 border rounded text-xs"
-                      value={filters.maritalStatus}
-                      onChange={(e) =>
-                        setFilters({
-                          ...filters,
-                          maritalStatus: e.target.value,
-                        })
-                      }
-                    >
-                      <option value="all">Any</option>
-                      <option value="Single">Single</option>
-                      <option value="Divorced">Divorced</option>
-                    </select>
-                  </div>
-
-                  {/* Boolean Filters (Shabbat, Kashrut, Kohen) */}
-                  {["isKohen", "shomerShabbat", "shomerKashrut"].map((key) => (
-                    <div key={key}>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                        {key.replace("is", "").replace("shomer", "Shomer ")}
-                      </label>
-                      <select
-                        className="w-full p-2 border rounded text-xs"
-                        value={filters[key]}
-                        onChange={(e) =>
-                          setFilters({ ...filters, [key]: e.target.value })
-                        }
-                      >
-                        <option value="all">Any</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
+              <div className="flex-1 overflow-y-auto space-y-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
+                  History
+                </p>
+                {events.map((ev) => (
+                  <div
+                    key={ev.id}
+                    onClick={() => setSelectedEvent(ev)}
+                    className={`p-3 rounded-lg cursor-pointer transition-all border ${
+                      selectedEvent?.id === ev.id
+                        ? "bg-blue-50 border-blue-200"
+                        : "bg-white border-transparent hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <span className="font-semibold text-slate-800 text-sm truncate">
+                        {ev.name}
+                      </span>
+                      {ev.active && (
+                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse mt-1"></span>
+                      )}
                     </div>
-                  ))}
+                    <p className="text-xs text-slate-500 mt-1">
+                      {ev.roundTime} minute(s) per round
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
 
-                  {/* Dress Style */}
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                      Dress Style
-                    </label>
-                    <select
-                      className="w-full p-2 border rounded text-xs"
-                      value={filters.dressStyle}
-                      onChange={(e) =>
-                        setFilters({ ...filters, dressStyle: e.target.value })
-                      }
-                    >
-                      <option value="all">Any</option>
-                      <option value="skirtsOnly">Skirts Only</option>
-                      <option value="skirtsPants">Skirts + Pants</option>
-                    </select>
+            {/* MAIN CONTENT: Event Details */}
+            <div className="flex-1 p-4 overflow-auto">
+              {selectedEvent ? (
+                <div className="w-full mx-auto">
+                  <button
+                    onClick={() => setSelectedEvent(null)}
+                    className="md:hidden mb-4 text-blue-600 font-bold flex items-center gap-2"
+                  >
+                    ← Back to Events
+                  </button>
+                  {/* HEADER SECTION */}
+                  <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-6 mb-10 pb-6 border-b border-slate-200">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h1 className="text-2xl md:text-4xl font-bold text-slate-900">
+                          {selectedEvent.name}
+                        </h1>
+                        <span
+                          className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase transition-colors duration-300 ${
+                            selectedEvent.active
+                              ? "bg-green-500 text-white animate-pulse"
+                              : "bg-slate-200 text-slate-600"
+                          }`}
+                        >
+                          {selectedEvent.active ? "LIVE" : "DRAFT"}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap md:flex-nowrap items-center gap-2 w-full md:w-auto group">
+                        <div
+                          onClick={() => copyRegistrationLink(selectedEvent.id)}
+                          className="flex items-center gap-2 px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-100 cursor-pointer hover:bg-blue-100 transition-all shadow-sm"
+                        >
+                          <span className="text-[10px] font-bold uppercase tracking-tight">
+                            Registration Link:
+                          </span>
+                          <code className="text-[10px] md:text-xs font-mono break-all md:break-normal">
+                            {window.location.origin}/register?eventId=
+                            {selectedEvent.id}
+                          </code>
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="lucide lucide-copy"
+                          >
+                            <rect
+                              width="14"
+                              height="14"
+                              x="8"
+                              y="8"
+                              rx="2"
+                              ry="2"
+                            />
+                            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                          </svg>
+                        </div>
+                        <span className="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity italic">
+                          Click to copy URL
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-500 mt-1">
+                        Round Time: {selectedEvent.roundTime} minute(s)
+                      </p>
+                      <p className="text-slate-400 text-sm mt-2 font-mono">
+                        ID: {selectedEvent.id}
+                      </p>
+                      <p className="text-slate-400 text-sm mt-2 font-mono">
+                        Event Date & Time:{" "}
+                        {selectedEvent.scheduledAt
+                          ? selectedEvent.scheduledAt.toDate().toLocaleString()
+                          : "Not scheduled"}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
+                      <button
+                        onClick={() =>
+                          toggleStatus(selectedEvent.id, selectedEvent.active)
+                        }
+                        className={`px-6 py-2 rounded-md font-bold flex items-center gap-2 transition-all duration-200 shadow-sm border ${
+                          selectedEvent.active
+                            ? "bg-white text-orange-600 border-orange-200 hover:bg-orange-50"
+                            : "bg-blue-900 text-white border-blue-900 hover:bg-blue-800"
+                        }`}
+                      >
+                        {selectedEvent.active ? (
+                          <>
+                            <Square size={16} fill="currentColor" /> Stop Event
+                          </>
+                        ) : (
+                          <>
+                            <Play size={16} fill="currentColor" /> Launch Event
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => deleteEvent(selectedEvent.id)}
+                        className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-md transition"
+                        title="Delete Event"
+                      >
+                        <Trash2 size={22} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* FILTER SYSTEM */}
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6">
+                    <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">
+                          Hashgafa Group
+                        </label>
+                        <select
+                          className="w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50"
+                          value={filters.hashgafa}
+                          onChange={(e) =>
+                            setFilters({ ...filters, hashgafa: e.target.value })
+                          }
+                        >
+                          <option value="all">All Groups</option>
+                          <option value="Expected">
+                            Hair-Covering Expected (Purple)
+                          </option>
+                          <option value="Flexible">Flexible (Green)</option>
+                          <option value="None">
+                            No Hair-Covering Expected (Blue)
+                          </option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-blue-600 uppercase mb-2 block">
+                          Men's Age Range
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            placeholder="Min"
+                            className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                            value={filters.minAgeMan}
+                            onChange={(e) =>
+                              setFilters({
+                                ...filters,
+                                minAgeMan: e.target.value,
+                              })
+                            }
+                          />
+                          <input
+                            type="number"
+                            placeholder="Max"
+                            className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                            value={filters.maxAgeMan}
+                            onChange={(e) =>
+                              setFilters({
+                                ...filters,
+                                maxAgeMan: e.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <label className="text-[10px] font-bold text-pink-600 uppercase block">
+                            Women's Age Range
+                          </label>
+                          <button
+                            onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+                            className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
+                          >
+                            {isAdvancedOpen
+                              ? "Close Advanced"
+                              : "Advanced Filters"}
+                            <ChevronDown
+                              size={14}
+                              className={`transition-transform ${isAdvancedOpen ? "rotate-180" : ""}`}
+                            />
+                          </button>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            placeholder="Min"
+                            className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                            value={filters.minAgeWoman}
+                            onChange={(e) =>
+                              setFilters({
+                                ...filters,
+                                minAgeWoman: e.target.value,
+                              })
+                            }
+                          />
+                          <input
+                            type="number"
+                            placeholder="Max"
+                            className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                            value={filters.maxAgeWoman}
+                            onChange={(e) =>
+                              setFilters({
+                                ...filters,
+                                maxAgeWoman: e.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ADVANCED FILTERS (Collapsible) */}
+                    {isAdvancedOpen && (
+                      <div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-slate-50/50 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                        {/* Gender */}
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                            Gender
+                          </label>
+                          <select
+                            className="w-full p-2 border rounded text-xs"
+                            value={filters.gender}
+                            onChange={(e) =>
+                              setFilters({ ...filters, gender: e.target.value })
+                            }
+                          >
+                            <option value="all">All</option>
+                            <option value="man">Men</option>
+                            <option value="woman">Women</option>
+                          </select>
+                        </div>
+
+                        {/* Ethnicity */}
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                            Ethnicity
+                          </label>
+                          <select
+                            className="w-full p-2 border rounded text-xs"
+                            value={filters.ethnicity}
+                            onChange={(e) =>
+                              setFilters({
+                                ...filters,
+                                ethnicity: e.target.value,
+                              })
+                            }
+                          >
+                            <option value="all">Any</option>
+                            <option value="Syrian / Egyptian / Lebanese">
+                              S/E/L
+                            </option>
+                            <option value="Other Sephardic">
+                              Other Sephardic
+                            </option>
+                            <option value="Ashkenaz">Ashkenaz</option>
+                          </select>
+                        </div>
+
+                        {/* Marital */}
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                            Marital
+                          </label>
+                          <select
+                            className="w-full p-2 border rounded text-xs"
+                            value={filters.maritalStatus}
+                            onChange={(e) =>
+                              setFilters({
+                                ...filters,
+                                maritalStatus: e.target.value,
+                              })
+                            }
+                          >
+                            <option value="all">Any</option>
+                            <option value="Single">Single</option>
+                            <option value="Divorced">Divorced</option>
+                          </select>
+                        </div>
+
+                        {/* Boolean Filters (Shabbat, Kashrut, Kohen) */}
+                        {["isKohen", "shomerShabbat", "shomerKashrut"].map(
+                          (key) => (
+                            <div key={key}>
+                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                                {key
+                                  .replace("is", "")
+                                  .replace("shomer", "Shomer ")}
+                              </label>
+                              <select
+                                className="w-full p-2 border rounded text-xs"
+                                value={filters[key]}
+                                onChange={(e) =>
+                                  setFilters({
+                                    ...filters,
+                                    [key]: e.target.value,
+                                  })
+                                }
+                              >
+                                <option value="all">Any</option>
+                                <option value="yes">Yes</option>
+                                <option value="no">No</option>
+                              </select>
+                            </div>
+                          ),
+                        )}
+
+                        {/* Dress Style */}
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                            Dress Style
+                          </label>
+                          <select
+                            className="w-full p-2 border rounded text-xs"
+                            value={filters.dressStyle}
+                            onChange={(e) =>
+                              setFilters({
+                                ...filters,
+                                dressStyle: e.target.value,
+                              })
+                            }
+                          >
+                            <option value="all">Any</option>
+                            <option value="skirtsOnly">Skirts Only</option>
+                            <option value="skirtsPants">Skirts + Pants</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* TABLE SECTION */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm min-w-450">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
+                          <tr>
+                            <th className="px-6 py-4 sticky left-0 bg-slate-50 z-20">
+                              Name / Age
+                            </th>
+                            <th className="px-6 py-4">Hashgafa</th>
+                            <th className="px-6 py-4">Confirmation Status</th>
+                            <th className="px-6 py-4">Group Assignment</th>
+                            <th className="px-6 py-4">Gender</th>
+                            <th className="px-6 py-4">Table Number</th>
+                            <th className="px-6 py-4">Ethnicity</th>
+                            <th className="px-6 py-4">Other Background</th>
+                            <th className="px-6 py-4">Marital Status</th>
+                            <th className="px-6 py-4">Kohen</th>
+                            <th className="px-6 py-4">Shomer Shabbat</th>
+                            <th className="px-6 py-4">Shomer Kashrut</th>
+                            <th className="px-6 py-4">
+                              Wants covered head (Male)
+                            </th>
+                            <th className="px-6 py-4">
+                              Wants to cover head (Female)
+                            </th>
+                            <th className="px-6 py-4">Dress Style (Female)</th>
+                            <th className="px-6 py-4">Anything else</th>
+                            <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
+                              Actions
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredAttendees.map((a) => {
+                            const hashgafa = getHashgafaGroup(a);
+                            return (
+                              <tr
+                                key={a.id}
+                                className="hover:bg-slate-50 transition-colors"
+                              >
+                                {/* Permanent Name Column */}
+                                <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
+                                  <p className="font-bold text-slate-900">
+                                    {a.firstName} {a.lastName}
+                                  </p>
+                                  <p className="text-xs text-slate-400">
+                                    {a.age}y • {a.gender}
+                                  </p>
+                                </td>
+
+                                <td className="px-6 py-4">
+                                  <span
+                                    className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
+                                  >
+                                    {hashgafa.label.toUpperCase()}
+                                  </span>
+                                </td>
+
+                                {/* Confirmation Status */}
+                                <td className="px-6 py-4">
+                                  <button
+                                    onClick={() =>
+                                      a.status == "cancelled" ? console.log("Already cancelled. Do nothing.") : toggleCheckIn(a.id, a.checkedIn)
+                                    }
+                                    className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
+                                      a.status == "cancelled" ? "bg-red-100 text-red-700" :
+                                      a.checkedIn
+                                        ? "bg-green-100 text-green-700"
+                                        : "bg-yellow-100 text-yellow-800"
+                                    }`}
+                                  >
+                                    {a.status == "cancelled" ? "CANCELLED" : a.checkedIn ? "CHECKED IN" : "PENDING"}
+                                  </button>
+                                </td>
+
+                                {/* Group Assignment */}
+                                <td className="px-6 py-4">
+                                  <select
+                                    value={a.groupId || "Group 1"}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "groupId",
+                                        e.target.value,
+                                      )
+                                    }
+                                    className="text-xs font-bold text-blue-900"
+                                  >
+                                    <option value="Group 1">Group 1</option>
+                                    <option value="Group 2">Group 2</option>
+                                    <option value="Group 3">Group 3</option>
+                                  </select>
+                                </td>
+
+                                {/* Gender */}
+                                <td className="px-6 py-4">
+                                  <select
+                                    value={a.gender}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "gender",
+                                        e.target.value,
+                                      )
+                                    }
+                                    className={`bg-transparent font-semibold outline-none ${
+                                      a.gender === "woman"
+                                        ? "text-pink-600"
+                                        : "text-blue-600"
+                                    }`}
+                                  >
+                                    <option value="man">Man</option>
+                                    <option value="woman">Woman</option>
+                                  </select>
+                                </td>
+
+                                {/* Table Number */}
+                                <td className="px-6 py-4 text-slate-800 font-mono">
+                                  {a.tableNumber || "-"}
+                                </td>
+
+                                {/* Ethnicity */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.ethnicity}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "ethnicity",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="Syrian / Egyptian / Lebanese">
+                                      Syrian / Egyptian / Lebanese
+                                    </option>
+                                    <option value="Other Sephardic">
+                                      Other Sephardic
+                                    </option>
+                                    <option value="Ashkenaz">Ashkenaz</option>
+                                    <option value="Other">Other</option>
+                                  </select>
+                                </td>
+
+                                {/* Other background */}
+                                <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                                  <textarea
+                                    className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                                    defaultValue={a.otherSpecify}
+                                    onBlur={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "otherSpecify",
+                                        e.target.value,
+                                      )
+                                    }
+                                  />
+                                </td>
+
+                                {/* Marital Status */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.maritalStatus}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "maritalStatus",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="Single">Single</option>
+                                    <option value="Divorced">Divorced</option>
+                                    <option value="Widowed">Widowed</option>
+                                  </select>
+                                </td>
+
+                                {/* Kohen */}
+                                <td className="px-6 py-4 text-slate-500 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      a.isKohen === "yes" || a.isKohen === true
+                                    }
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "isKohen",
+                                        e.target.checked ? "yes" : "no",
+                                      )
+                                    }
+                                  />
+                                </td>
+
+                                {/* Shomer Shabbat */}
+                                <td className="px-6 py-4 text-slate-500 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      a.isShomerShabbat === "yes" ||
+                                      a.isShomerShabbat === true
+                                    }
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "isShomerShabbat",
+                                        e.target.checked ? "yes" : "no",
+                                      )
+                                    }
+                                  />
+                                </td>
+
+                                {/* Shomer Kashrut */}
+                                <td className="px-6 py-4 text-slate-500 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      a.isShomerKashrut === "yes" ||
+                                      a.isShomerKashrut === true
+                                    }
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "isShomerKashrut",
+                                        e.target.checked ? "yes" : "no",
+                                      )
+                                    }
+                                  />
+                                </td>
+
+                                {/* Wants Girl to cover her hair */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.wantsCoveredHead}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "wantsCoveredHead",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="N/A">Not applicable</option>
+                                    <option value="yes">Yes</option>
+                                    <option value="no">No</option>
+                                    <option value="noPreference">
+                                      No preference
+                                    </option>
+                                  </select>
+                                </td>
+
+                                {/* Girl to cover her hair */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.hairCovering}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "hairCovering",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="N/A">Not applicable</option>
+                                    <option value="willCoverHair">
+                                      Will cover hair
+                                    </option>
+                                    <option value="openFlexible">
+                                      Open / Flexible
+                                    </option>
+                                    <option value="notPlanning">
+                                      Not planning to cover hair
+                                    </option>
+                                  </select>
+                                </td>
+
+                                {/* Dress Style */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.dressStyle}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "dressStyle",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="N/A">Not applicable</option>
+                                    <option value="skirtsOnly">
+                                      Skirts only
+                                    </option>
+                                    <option value="skirtsPants">
+                                      Skirts + pants
+                                    </option>
+                                  </select>
+                                </td>
+
+                                {/* Open to Marital (Array Edit) */}
+                                <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                                  <textarea
+                                    className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                                    defaultValue={a.anythingElse}
+                                    onBlur={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "anythingElse",
+                                        e.target.value.map((s) => s.trim()),
+                                      )
+                                    }
+                                  />
+                                </td>
+
+                                {/* Actions */}
+                                <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
+                                  <button
+                                    onClick={() => deleteAttendee(a.id, a.name)}
+                                    className="p-2 text-slate-300 hover:text-red-500 transition-all"
+                                  >
+                                    <UserMinus size={18} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {attendees.length === 0 && (
+                      <div className="p-20 text-center text-slate-400 italic">
+                        No registrations yet.
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
-
-            {/* TABLE SECTION */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm min-w-[1800px]">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
-                    <tr>
-                      <th className="px-6 py-4 sticky left-0 bg-slate-50 z-20">
-                        Name / Age
-                      </th>
-                      <th className="px-6 py-4">Hashgafa</th>
-                      <th className="px-6 py-4">Status</th>
-                      <th className="px-6 py-4">Gender</th>
-                      <th className="px-6 py-4">Table Number</th>
-                      <th className="px-6 py-4">Ethnicity</th>
-                      <th className="px-6 py-4">Other Background</th>
-                      <th className="px-6 py-4">Marital Status</th>
-                      <th className="px-6 py-4">Kohen</th>
-                      <th className="px-6 py-4">Shomer Shabbat</th>
-                      <th className="px-6 py-4">Shomer Kashrut</th>
-                      <th className="px-6 py-4">Wants covered head (Male)</th>
-                      <th className="px-6 py-4">
-                        Wants to cover head (Female)
-                      </th>
-                      <th className="px-6 py-4">Dress Style (Female)</th>
-                      <th className="px-6 py-4">Anything else</th>
-                      <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredAttendees.map((a) => {
-                      const hashgafa = getHashgafaGroup(a);
-                      return (
-                        <tr
-                          key={a.id}
-                          className="hover:bg-slate-50 transition-colors"
-                        >
-                          {/* Permanent Name Column */}
-                          <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
-                            <p className="font-bold text-slate-900">
-                              {a.firstName} {a.lastName}
-                            </p>
-                            <p className="text-xs text-slate-400">
-                              {a.age}y • {a.gender}
-                            </p>
-                          </td>
-
-                          <td className="px-6 py-4">
-                            <span
-                              className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
-                            >
-                              {hashgafa.label.toUpperCase()}
-                            </span>
-                          </td>
-
-                          <td className="px-6 py-4">
-                            <button
-                              onClick={() => toggleCheckIn(a.id, a.checkedIn)}
-                              className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
-                                a.checkedIn
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-yellow-100 text-yellow-800"
-                              }`}
-                            >
-                              {a.checkedIn ? "CHECKED IN" : "PENDING"}
-                            </button>
-                          </td>
-
-                          {/* Gender */}
-                          <td className="px-6 py-4">
-                            <select
-                              value={a.gender}
-                              onChange={(e) =>
-                                updateAttendeeField(a, "gender", e.target.value)
-                              }
-                              className={`bg-transparent font-semibold outline-none ${
-                                a.gender === "woman"
-                                  ? "text-pink-600"
-                                  : "text-blue-600"
-                              }`}
-                            >
-                              <option value="man">Man</option>
-                              <option value="woman">Woman</option>
-                            </select>
-                          </td>
-
-                          {/* Table Number */}
-                          <td className="px-6 py-4 text-slate-800 font-mono">
-                            {a.tableNumber || "-"}
-                          </td>
-
-                          {/* Ethnicity */}
-                          <td className="px-6 py-4 text-slate-500">
-                            <select
-                              className="bg-transparent outline-none"
-                              value={a.ethnicity}
-                              onChange={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "ethnicity",
-                                  e.target.value,
-                                )
-                              }
-                            >
-                              <option value="Syrian / Egyptian / Lebanese">
-                                Syrian / Egyptian / Lebanese
-                              </option>
-                              <option value="Other Sephardic">
-                                Other Sephardic
-                              </option>
-                              <option value="Ashkenaz">Ashkenaz</option>
-                              <option value="Other">Other</option>
-                            </select>
-                          </td>
-
-                          {/* Other background */}
-                          <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                            <textarea
-                              className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                              defaultValue={a.otherSpecify}
-                              onBlur={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "otherSpecify",
-                                  e.target.value,
-                                )
-                              }
-                            />
-                          </td>
-
-                          {/* Marital Status */}
-                          <td className="px-6 py-4 text-slate-500">
-                            <select
-                              className="bg-transparent outline-none"
-                              value={a.maritalStatus}
-                              onChange={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "maritalStatus",
-                                  e.target.value,
-                                )
-                              }
-                            >
-                              <option value="Single">Single</option>
-                              <option value="Divorced">Divorced</option>
-                              <option value="Widowed">Widowed</option>
-                            </select>
-                          </td>
-
-                          {/* Kohen */}
-                          <td className="px-6 py-4 text-slate-500 text-center">
-                            <input
-                              type="checkbox"
-                              checked={
-                                a.isKohen === "yes" || a.isKohen === true
-                              }
-                              onChange={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "isKohen",
-                                  e.target.checked ? "yes" : "no",
-                                )
-                              }
-                            />
-                          </td>
-
-                          {/* Shomer Shabbat */}
-                          <td className="px-6 py-4 text-slate-500 text-center">
-                            <input
-                              type="checkbox"
-                              checked={
-                                a.isShomerShabbat === "yes" ||
-                                a.isShomerShabbat === true
-                              }
-                              onChange={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "isShomerShabbat",
-                                  e.target.checked ? "yes" : "no",
-                                )
-                              }
-                            />
-                          </td>
-
-                          {/* Shomer Kashrut */}
-                          <td className="px-6 py-4 text-slate-500 text-center">
-                            <input
-                              type="checkbox"
-                              checked={
-                                a.isShomerKashrut === "yes" ||
-                                a.isShomerKashrut === true
-                              }
-                              onChange={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "isShomerKashrut",
-                                  e.target.checked ? "yes" : "no",
-                                )
-                              }
-                            />
-                          </td>
-
-                          {/* Wants Girl to cover her hair */}
-                          <td className="px-6 py-4 text-slate-500">
-                            <select
-                              className="bg-transparent outline-none"
-                              value={a.wantsCoveredHead}
-                              onChange={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "wantsCoveredHead",
-                                  e.target.value,
-                                )
-                              }
-                            >
-                              <option value="N/A">Not applicable</option>
-                              <option value="yes">Yes</option>
-                              <option value="no">No</option>
-                              <option value="noPreference">
-                                No preference
-                              </option>
-                            </select>
-                          </td>
-
-                          {/* Girl to cover her hair */}
-                          <td className="px-6 py-4 text-slate-500">
-                            <select
-                              className="bg-transparent outline-none"
-                              value={a.hairCovering}
-                              onChange={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "hairCovering",
-                                  e.target.value,
-                                )
-                              }
-                            >
-                              <option value="N/A">Not applicable</option>
-                              <option value="willCoverHair">
-                                Will cover hair
-                              </option>
-                              <option value="openFlexible">
-                                Open / Flexible
-                              </option>
-                              <option value="notPlanning">
-                                Not planning to cover hair
-                              </option>
-                            </select>
-                          </td>
-
-                          {/* Dress Style */}
-                          <td className="px-6 py-4 text-slate-500">
-                            <select
-                              className="bg-transparent outline-none"
-                              value={a.dressStyle}
-                              onChange={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "dressStyle",
-                                  e.target.value,
-                                )
-                              }
-                            >
-                              <option value="N/A">Not applicable</option>
-                              <option value="skirtsOnly">Skirts only</option>
-                              <option value="skirtsPants">
-                                Skirts + pants
-                              </option>
-                            </select>
-                          </td>
-
-                          {/* Open to Marital (Array Edit) */}
-                          <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                            <textarea
-                              className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                              defaultValue={a.anythingElse}
-                              onBlur={(e) =>
-                                updateAttendeeField(
-                                  a,
-                                  "anythingElse",
-                                  e.target.value.map((s) => s.trim()),
-                                )
-                              }
-                            />
-                          </td>
-
-                          {/* Actions */}
-                          <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
-                            <button
-                              onClick={() => deleteAttendee(a.id, a.name)}
-                              className="p-2 text-slate-300 hover:text-red-500 transition-all"
-                            >
-                              <UserMinus size={18} />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {attendees.length === 0 && (
-                <div className="p-20 text-center text-slate-400 italic">
-                  No registrations yet.
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-slate-300">
+                  <Calendar
+                    size={80}
+                    strokeWidth={1}
+                    className="mb-4 opacity-20"
+                  />
+                  <p className="text-lg font-medium">
+                    Select an event to manage
+                  </p>
                 </div>
               )}
             </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-slate-300">
-            <Calendar size={80} strokeWidth={1} className="mb-4 opacity-20" />
-            <p className="text-lg font-medium">Select an event to manage</p>
           </div>
         )}
       </div>
