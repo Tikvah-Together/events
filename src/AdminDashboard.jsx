@@ -4,7 +4,6 @@ import {
   collection,
   addDoc,
   documentId,
-  getDoc,
   getDocs,
   doc,
   updateDoc,
@@ -849,6 +848,7 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                       </p>
                     </div>
 
+<<<<<<< HEAD
 <div className="flex flex-col gap-4 bg-slate-100 p-5 rounded-xl border border-slate-200 mb-8">
   {/* Header & Add Input Row */}
   <div className="flex items-end justify-between gap-10"> 
@@ -941,6 +941,8 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
 </div>
 </div>
 
+=======
+>>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
                     <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
                       <button
                         onClick={() =>
@@ -1207,7 +1209,10 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                             </th>
                             <th className="px-6 py-4">Hashgafa</th>
                             <th className="px-6 py-4">Confirmation Status</th>
+<<<<<<< HEAD
                             <th className="px-6 py-4">Check-In</th>
+=======
+>>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
                             <th className="px-6 py-4">Group Assignment</th>
                             <th className="px-6 py-4">Gender</th>
                             <th className="px-6 py-4">Table Number</th>
@@ -1231,6 +1236,7 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
+<<<<<<< HEAD
                           {filteredAttendees.sort((a, b) => (a.groupId || "").localeCompare(b.groupId || "")).map((a, index) => {
                             const hashgafa = getHashgafaGroup(a);
                             const isNewGroup = index > 0 && a.groupId !== filteredAttendees[index - 1].groupId;
@@ -1239,6 +1245,14 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                               <tr
                                 key={a.id}
                                 className={`hover:bg-slate-50 transition-colors ${ isNewGroup ? "border-t-4 border-slate-300" : ""}`}
+=======
+                          {filteredAttendees.map((a) => {
+                            const hashgafa = getHashgafaGroup(a);
+                            return (
+                              <tr
+                                key={a.id}
+                                className="hover:bg-slate-50 transition-colors"
+>>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
                               >
                                 {/* Permanent Name Column */}
                                 <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
@@ -1258,6 +1272,7 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                                   </span>
                                 </td>
 
+<<<<<<< HEAD
                                 {/* Confirmation Status, possible values are: Invited, Confirmed, Declined, Waitlist, and No Response */}
                                 <td className="px-6 py-4">
                                   <select
@@ -1286,16 +1301,31 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                                       toggleCheckIn(a.id, a.checkedIn)
                                     }
                                     className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
+=======
+                                {/* Confirmation Status */}
+                                <td className="px-6 py-4">
+                                  <button
+                                    onClick={() =>
+                                      a.status == "cancelled" ? console.log("Already cancelled. Do nothing.") : toggleCheckIn(a.id, a.checkedIn)
+                                    }
+                                    className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
+                                      a.status == "cancelled" ? "bg-red-100 text-red-700" :
+>>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
                                       a.checkedIn
                                         ? "bg-green-100 text-green-700"
                                         : "bg-yellow-100 text-yellow-800"
                                     }`}
                                   >
+<<<<<<< HEAD
                                     {a.checkedIn ? "CHECKED IN" : "PENDING"}
+=======
+                                    {a.status == "cancelled" ? "CANCELLED" : a.checkedIn ? "CHECKED IN" : "PENDING"}
+>>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
                                   </button>
                                 </td>
 
                                 {/* Group Assignment */}
+<<<<<<< HEAD
 <td className="px-6 py-4">
   <select
     /* 1. We look at the groupId stored on this registration */
@@ -1312,6 +1342,25 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
     ))}
   </select>
 </td>
+=======
+                                <td className="px-6 py-4">
+                                  <select
+                                    value={a.groupId || "Group 1"}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "groupId",
+                                        e.target.value,
+                                      )
+                                    }
+                                    className="text-xs font-bold text-blue-900"
+                                  >
+                                    <option value="Group 1">Group 1</option>
+                                    <option value="Group 2">Group 2</option>
+                                    <option value="Group 3">Group 3</option>
+                                  </select>
+                                </td>
+>>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
 
                                 {/* Gender */}
                                 <td className="px-6 py-4">
