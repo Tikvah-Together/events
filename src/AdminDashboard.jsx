@@ -208,82 +208,87 @@ export default function AdminDashboard() {
     });
   };
 
-const toggleCheckIn = async (attendeeId, currentStatus) => {
-  try {
-    const newStatus = !currentStatus;
-    const regRef = doc(db, "registrations", attendeeId);
+  const toggleCheckIn = async (attendeeId, currentStatus) => {
+    try {
+      const newStatus = !currentStatus;
+      const regRef = doc(db, "registrations", attendeeId);
 
-    // 1. Get FRESH Registration data
-    const regSnap = await getDoc(regRef);
-    if (!regSnap.exists()) return;
-    const registration = regSnap.data();
+      // 1. Get FRESH Registration data
+      const regSnap = await getDoc(regRef);
+      if (!regSnap.exists()) return;
+      const registration = regSnap.data();
 
-    if (!newStatus) {
-      await updateDoc(regRef, { checkedIn: false, tableNumber: null });
-      return;
+      if (!newStatus) {
+        await updateDoc(regRef, { checkedIn: false, tableNumber: null });
+        return;
+      }
+
+      // 2. Fetch User (Gender) and Event (Groups)
+      const [userSnap, eventSnap] = await Promise.all([
+        getDoc(doc(db, "users", registration.userId)),
+        getDoc(doc(db, "events", registration.eventId)),
+      ]);
+
+      const userData = userSnap.data();
+      const eventData = eventSnap.data();
+      const eventGroups = eventData.eventGroups || [];
+
+      // The name of the group (e.g., "Group 1")
+      const participantGroupName = String(registration.groupId || "");
+      const gender = userData?.gender;
+      const prefix = gender === "woman" ? "G" : "B";
+
+      // 3. Find the index by matching the NAME
+      const groupIdx = eventGroups.findIndex(
+        (g) => String(g.name) === participantGroupName,
+      );
+
+      // If name isn't found in the current event groups, default to "U"
+      const groupSuffix =
+        groupIdx >= 0 ? String.fromCharCode(65 + groupIdx) : "U";
+
+      // 4. Fetch all registrations for this event
+      const attSnap = await getDocs(
+        query(
+          collection(db, "registrations"),
+          where("eventId", "==", registration.eventId),
+        ),
+      );
+      const allRegs = attSnap.docs.map((d) => d.data());
+
+      // 5. Filter for people of SAME gender AND SAME group name
+      const takenNumbers = allRegs
+        .filter(
+          (a) =>
+            a.checkedIn &&
+            String(a.groupId) === participantGroupName &&
+            a.tableNumber?.startsWith(prefix),
+        )
+        .map((a) => {
+          // Extract number from "B1-A" -> "1"
+          const beforeHyphen = a.tableNumber.split("-")[0]; // "B1"
+          const numOnly = beforeHyphen.substring(1); // "1"
+          return parseInt(numOnly);
+        })
+        .filter((num) => !isNaN(num))
+        .sort((a, b) => a - b);
+
+      // 6. Find lowest available number
+      let assignedNumber = 1;
+      for (let i = 0; i < takenNumbers.length; i++) {
+        if (takenNumbers[i] === assignedNumber) assignedNumber++;
+        else if (takenNumbers[i] > assignedNumber) break;
+      }
+
+      // 7. Update Database
+      await updateDoc(regRef, {
+        checkedIn: true,
+        tableNumber: `${prefix}${assignedNumber}-${groupSuffix}`,
+      });
+    } catch (err) {
+      console.error("Check-in error:", err);
     }
-
-    // 2. Fetch User (Gender) and Event (Groups)
-    const [userSnap, eventSnap] = await Promise.all([
-      getDoc(doc(db, "users", registration.userId)),
-      getDoc(doc(db, "events", registration.eventId))
-    ]);
-
-    const userData = userSnap.data();
-    const eventData = eventSnap.data();
-    const eventGroups = eventData.eventGroups || [];
-    
-    // The name of the group (e.g., "Group 1")
-    const participantGroupName = String(registration.groupId || ""); 
-    const gender = userData?.gender;
-    const prefix = gender === "woman" ? "G" : "B";
-
-    // 3. Find the index by matching the NAME
-    const groupIdx = eventGroups.findIndex(g => String(g.name) === participantGroupName);
-    
-    // If name isn't found in the current event groups, default to "U"
-    const groupSuffix = groupIdx >= 0 ? String.fromCharCode(65 + groupIdx) : "U";
-
-    // 4. Fetch all registrations for this event
-    const attSnap = await getDocs(query(
-      collection(db, "registrations"), 
-      where("eventId", "==", registration.eventId)
-    ));
-    const allRegs = attSnap.docs.map(d => d.data());
-
-    // 5. Filter for people of SAME gender AND SAME group name
-    const takenNumbers = allRegs
-      .filter((a) => 
-        a.checkedIn && 
-        String(a.groupId) === participantGroupName && 
-        a.tableNumber?.startsWith(prefix)
-      )
-      .map((a) => {
-        // Extract number from "B1-A" -> "1"
-        const beforeHyphen = a.tableNumber.split("-")[0]; // "B1"
-        const numOnly = beforeHyphen.substring(1); // "1"
-        return parseInt(numOnly);
-      })
-      .filter(num => !isNaN(num))
-      .sort((a, b) => a - b);
-
-    // 6. Find lowest available number
-    let assignedNumber = 1;
-    for (let i = 0; i < takenNumbers.length; i++) {
-      if (takenNumbers[i] === assignedNumber) assignedNumber++;
-      else if (takenNumbers[i] > assignedNumber) break;
-    }
-
-    // 7. Update Database
-    await updateDoc(regRef, {
-      checkedIn: true,
-      tableNumber: `${prefix}${assignedNumber}-${groupSuffix}`,
-    });
-
-  } catch (err) {
-    console.error("Check-in error:", err);
-  }
-};
+  };
 
   const deleteAttendee = async (attendeeId, name) => {
     if (window.confirm(`Remove ${name} from this event?`)) {
@@ -370,10 +375,14 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
     const unsubscribe = onSnapshot(q, (snap) => {
       setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       // If we currently have an event selected, find its NEWEST version from the fresh data
-    setSelectedEvent((currentSelected) => {
-      if (!currentSelected) return null;
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() })).find((e) => e.id === currentSelected.id) || null;
-    });
+      setSelectedEvent((currentSelected) => {
+        if (!currentSelected) return null;
+        return (
+          snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .find((e) => e.id === currentSelected.id) || null
+        );
+      });
     });
     return () => unsubscribe();
   }, []);
@@ -493,7 +502,12 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
 
   const updateAttendeeField = async (attendee, field, newValue) => {
     try {
-      const registrationFields = ["checkedIn", "groupId", "tableNumber", "isConfirmed"];
+      const registrationFields = [
+        "checkedIn",
+        "groupId",
+        "tableNumber",
+        "isConfirmed",
+      ];
       const isRegistrationField = registrationFields.includes(field);
 
       const collectionName = isRegistrationField ? "registrations" : "users";
@@ -848,101 +862,133 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                       </p>
                     </div>
 
-<<<<<<< HEAD
-<div className="flex flex-col gap-4 bg-slate-100 p-5 rounded-xl border border-slate-200 mb-8">
-  {/* Header & Add Input Row */}
-  <div className="flex items-end justify-between gap-10"> 
-    <div className="flex flex-col flex-1">
-      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-        Event Configuration
-      </span>
-      <div className="flex gap-2">
-        <input 
-          type="text"
-          placeholder="Enter group name (e.g. Young Professionals)"
-          value={newGroupName}
-          onChange={(e) => setNewGroupName(e.target.value)}
-          className="flex-1 p-2 text-sm border border-slate-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
-        />
-        <button 
-          onClick={async () => {
-            if (!newGroupName.trim()) {
-              alert("Please enter a group name first.");
-              return;
-            }
-            try {
-              const existingGroups = selectedEvent.eventGroups || [];
-              const newGroup = { 
-                name: newGroupName.trim() 
-              };
-              
-              const updatedGroups = [...existingGroups, newGroup];
-              
-              await updateDoc(doc(db, "events", selectedEvent.id), { 
-                eventGroups: updatedGroups 
-              });
-              
-              setNewGroupName(""); // Clear the input after success
-              alert(`"${newGroup.name}" created.`);
-            } catch (error) {
-              alert("Error adding group.");
-            }
-          }}
-          className="flex items-center gap-2 text-xs bg-blue-900 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-800 transition-all shadow-sm h-10"
-        >
-          <Plus size={14} />
-          Add Group
-        </button>
-      </div>
-    </div>
-  </div>
-  
-  {/* Active Groups Display */}
-<div className="flex flex-wrap gap-3 mt-2 border-t border-slate-200 pt-4">
-  <span className="w-full text-[10px] font-bold text-slate-400 uppercase">Existing Groups:</span>
-  
-  {/* We look up the event directly from the main 'events' state to ensure it's the live version */}
-  {(events.find(e => e.id === selectedEvent?.id)?.eventGroups || []).length === 0 && (
-    <span className="text-xs italic text-slate-400">No groups created yet.</span>
-  )}
+                    <div className="flex flex-col gap-4 bg-slate-100 p-5 rounded-xl border border-slate-200 mb-8">
+                      {/* Header & Add Input Row */}
+                      <div className="flex items-end justify-between gap-10">
+                        <div className="flex flex-col flex-1">
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                            Event Configuration
+                          </span>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="Enter group name (e.g. Young Professionals)"
+                              value={newGroupName}
+                              onChange={(e) => setNewGroupName(e.target.value)}
+                              className="flex-1 p-2 text-sm border border-slate-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                            <button
+                              onClick={async () => {
+                                if (!newGroupName.trim()) {
+                                  alert("Please enter a group name first.");
+                                  return;
+                                }
+                                try {
+                                  const existingGroups =
+                                    selectedEvent.eventGroups || [];
+                                  const newGroup = {
+                                    name: newGroupName.trim(),
+                                  };
 
-  {(events.find(e => e.id === selectedEvent?.id)?.eventGroups || []).map((group, idx) => (
-    <div key={group.name} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm hover:border-blue-300 transition-colors">
-      <input 
-        className="text-xs font-bold w-32 outline-none text-slate-700"
-        value={group.name}
-        onChange={async (e) => {
-          const liveEvent = events.find(ev => ev.id === selectedEvent.id);
-          const updatedGroups = [...liveEvent.eventGroups];
-          updatedGroups[idx].name = e.target.value;
-          
-          await updateDoc(doc(db, "events", selectedEvent.id), { 
-            eventGroups: updatedGroups 
-          });
-        }}
-      />
-      <button 
-        onClick={async () => {
-          if (window.confirm(`Delete "${group.name}"?`)) {
-            const liveEvent = events.find(ev => ev.id === selectedEvent.id);
-            const updatedGroups = liveEvent.eventGroups.filter((_, i) => i !== idx);
-            
-            await updateDoc(doc(db, "events", selectedEvent.id), { 
-              eventGroups: updatedGroups 
-            });
-          }
-        }}
-        className="text-slate-300 hover:text-red-500 transition-colors"
-      >
-        <Trash2 size={14} />
-      </button>
-    </div>
-  ))}
-</div>
-</div>
+                                  const updatedGroups = [
+                                    ...existingGroups,
+                                    newGroup,
+                                  ];
 
-=======
->>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
+                                  await updateDoc(
+                                    doc(db, "events", selectedEvent.id),
+                                    {
+                                      eventGroups: updatedGroups,
+                                    },
+                                  );
+
+                                  setNewGroupName(""); // Clear the input after success
+                                  alert(`"${newGroup.name}" created.`);
+                                } catch (error) {
+                                  alert("Error adding group.");
+                                }
+                              }}
+                              className="flex items-center gap-2 text-xs bg-blue-900 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-800 transition-all shadow-sm h-10"
+                            >
+                              <Plus size={14} />
+                              Add Group
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Active Groups Display */}
+                      <div className="flex flex-wrap gap-3 mt-2 border-t border-slate-200 pt-4">
+                        <span className="w-full text-[10px] font-bold text-slate-400 uppercase">
+                          Existing Groups:
+                        </span>
+
+                        {/* We look up the event directly from the main 'events' state to ensure it's the live version */}
+                        {(
+                          events.find((e) => e.id === selectedEvent?.id)
+                            ?.eventGroups || []
+                        ).length === 0 && (
+                          <span className="text-xs italic text-slate-400">
+                            No groups created yet.
+                          </span>
+                        )}
+
+                        {(
+                          events.find((e) => e.id === selectedEvent?.id)
+                            ?.eventGroups || []
+                        ).map((group, idx) => (
+                          <div
+                            key={group.name}
+                            className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm hover:border-blue-300 transition-colors"
+                          >
+                            <input
+                              className="text-xs font-bold w-32 outline-none text-slate-700"
+                              value={group.name}
+                              onChange={async (e) => {
+                                const liveEvent = events.find(
+                                  (ev) => ev.id === selectedEvent.id,
+                                );
+                                const updatedGroups = [
+                                  ...liveEvent.eventGroups,
+                                ];
+                                updatedGroups[idx].name = e.target.value;
+
+                                await updateDoc(
+                                  doc(db, "events", selectedEvent.id),
+                                  {
+                                    eventGroups: updatedGroups,
+                                  },
+                                );
+                              }}
+                            />
+                            <button
+                              onClick={async () => {
+                                if (window.confirm(`Delete "${group.name}"?`)) {
+                                  const liveEvent = events.find(
+                                    (ev) => ev.id === selectedEvent.id,
+                                  );
+                                  const updatedGroups =
+                                    liveEvent.eventGroups.filter(
+                                      (_, i) => i !== idx,
+                                    );
+
+                                  await updateDoc(
+                                    doc(db, "events", selectedEvent.id),
+                                    {
+                                      eventGroups: updatedGroups,
+                                    },
+                                  );
+                                }
+                              }}
+                              className="text-slate-300 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
                       <button
                         onClick={() =>
@@ -1209,10 +1255,7 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                             </th>
                             <th className="px-6 py-4">Hashgafa</th>
                             <th className="px-6 py-4">Confirmation Status</th>
-<<<<<<< HEAD
                             <th className="px-6 py-4">Check-In</th>
-=======
->>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
                             <th className="px-6 py-4">Group Assignment</th>
                             <th className="px-6 py-4">Gender</th>
                             <th className="px-6 py-4">Table Number</th>
@@ -1236,368 +1279,354 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-<<<<<<< HEAD
-                          {filteredAttendees.sort((a, b) => (a.groupId || "").localeCompare(b.groupId || "")).map((a, index) => {
-                            const hashgafa = getHashgafaGroup(a);
-                            const isNewGroup = index > 0 && a.groupId !== filteredAttendees[index - 1].groupId;
-                            return (
-                              
-                              <tr
-                                key={a.id}
-                                className={`hover:bg-slate-50 transition-colors ${ isNewGroup ? "border-t-4 border-slate-300" : ""}`}
-=======
-                          {filteredAttendees.map((a) => {
-                            const hashgafa = getHashgafaGroup(a);
-                            return (
-                              <tr
-                                key={a.id}
-                                className="hover:bg-slate-50 transition-colors"
->>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
-                              >
-                                {/* Permanent Name Column */}
-                                <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
-                                  <p className="font-bold text-slate-900">
-                                    {a.firstName} {a.lastName}
-                                  </p>
-                                  <p className="text-xs text-slate-400">
-                                    {a.age}y • {a.gender}
-                                  </p>
-                                </td>
+                          {filteredAttendees
+                            .sort((a, b) =>
+                              (a.groupId || "").localeCompare(b.groupId || ""),
+                            )
+                            .map((a, index) => {
+                              const hashgafa = getHashgafaGroup(a);
+                              const isNewGroup =
+                                index > 0 &&
+                                a.groupId !==
+                                  filteredAttendees[index - 1].groupId;
+                              return (
+                                <tr
+                                  key={a.id}
+                                  className={`hover:bg-slate-50 transition-colors ${isNewGroup ? "border-t-4 border-slate-300" : ""}`}
+                                >
+                                  {/* Permanent Name Column */}
+                                  <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
+                                    <p className="font-bold text-slate-900">
+                                      {a.firstName} {a.lastName}
+                                    </p>
+                                    <p className="text-xs text-slate-400">
+                                      {a.age}y • {a.gender}
+                                    </p>
+                                  </td>
 
-                                <td className="px-6 py-4">
-                                  <span
-                                    className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
-                                  >
-                                    {hashgafa.label.toUpperCase()}
-                                  </span>
-                                </td>
+                                  <td className="px-6 py-4">
+                                    <span
+                                      className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
+                                    >
+                                      {hashgafa.label.toUpperCase()}
+                                    </span>
+                                  </td>
 
-<<<<<<< HEAD
-                                {/* Confirmation Status, possible values are: Invited, Confirmed, Declined, Waitlist, and No Response */}
-                                <td className="px-6 py-4">
-                                  <select
-                                    value={a.status}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "status",
-                                        e.target.value
-                                      )
-                                    }
-                                    className="text-xs font-bold text-blue-900"
-                                  >
-                                    <option value="waitlist">Waitlist</option>
-                                    <option value="invited">Invited</option>
-                                    <option value="confirmed">Confirmed</option>
-                                    <option value="declined">Declined</option>
-                                    <option value="no response">No Response</option>
-                                  </select>
-                                </td>
+                                  {/* Confirmation Status, possible values are: Invited, Confirmed, Declined, Waitlist, and No Response */}
+                                  <td className="px-6 py-4">
+                                    <select
+                                      value={a.status}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "status",
+                                          e.target.value,
+                                        )
+                                      }
+                                      className="text-xs font-bold text-blue-900"
+                                    >
+                                      <option value="waitlist">Waitlist</option>
+                                      <option value="invited">Invited</option>
+                                      <option value="confirmed">
+                                        Confirmed
+                                      </option>
+                                      <option value="declined">Declined</option>
+                                      <option value="no response">
+                                        No Response
+                                      </option>
+                                    </select>
+                                  </td>
 
-                                {/* Check-In */}
-                                <td className="px-6 py-4">
-                                  <button
-                                    onClick={() =>
-                                      toggleCheckIn(a.id, a.checkedIn)
-                                    }
-                                    className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
-=======
-                                {/* Confirmation Status */}
-                                <td className="px-6 py-4">
-                                  <button
-                                    onClick={() =>
-                                      a.status == "cancelled" ? console.log("Already cancelled. Do nothing.") : toggleCheckIn(a.id, a.checkedIn)
-                                    }
-                                    className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
-                                      a.status == "cancelled" ? "bg-red-100 text-red-700" :
->>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
-                                      a.checkedIn
-                                        ? "bg-green-100 text-green-700"
-                                        : "bg-yellow-100 text-yellow-800"
-                                    }`}
-                                  >
-<<<<<<< HEAD
-                                    {a.checkedIn ? "CHECKED IN" : "PENDING"}
-=======
-                                    {a.status == "cancelled" ? "CANCELLED" : a.checkedIn ? "CHECKED IN" : "PENDING"}
->>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
-                                  </button>
-                                </td>
+                                  {/* Check-In */}
+                                  <td className="px-6 py-4">
+                                    <button
+                                      onClick={() =>
+                                        toggleCheckIn(a.id, a.checkedIn)
+                                      }
+                                      className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
+                                        a.checkedIn
+                                          ? "bg-green-100 text-green-700"
+                                          : "bg-yellow-100 text-yellow-800"
+                                      }`}
+                                    >
+                                      {a.checkedIn ? "CHECKED IN" : "PENDING"}
+                                    </button>
+                                  </td>
 
-                                {/* Group Assignment */}
-<<<<<<< HEAD
-<td className="px-6 py-4">
-  <select
-    /* 1. We look at the groupId stored on this registration */
-    value={a.groupId || ""} 
-    /* 2. We pass only the ID, the field name, and the new value */
-    onChange={(e) => updateAttendeeField(a, "groupId", e.target.value)}
-    className="text-xs font-bold text-blue-900 bg-white border border-slate-200 rounded p-1 outline-none focus:ring-2 focus:ring-blue-500"
-  >
-    <option value="">Unassigned</option>
-    {(selectedEvent?.eventGroups || []).map((group) => (
-      <option key={group.name} value={group.name}>
-        {group.name}
-      </option>
-    ))}
-  </select>
-</td>
-=======
-                                <td className="px-6 py-4">
-                                  <select
-                                    value={a.groupId || "Group 1"}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "groupId",
-                                        e.target.value,
-                                      )
-                                    }
-                                    className="text-xs font-bold text-blue-900"
-                                  >
-                                    <option value="Group 1">Group 1</option>
-                                    <option value="Group 2">Group 2</option>
-                                    <option value="Group 3">Group 3</option>
-                                  </select>
-                                </td>
->>>>>>> 9162e30b93331f435b3b7813fe4cafee37755f16
+                                  {/* Group Assignment */}
+                                  <td className="px-6 py-4">
+                                    <select
+                                      /* 1. We look at the groupId stored on this registration */
+                                      value={a.groupId || ""}
+                                      /* 2. We pass only the ID, the field name, and the new value */
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "groupId",
+                                          e.target.value,
+                                        )
+                                      }
+                                      className="text-xs font-bold text-blue-900 bg-white border border-slate-200 rounded p-1 outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                      <option value="">Unassigned</option>
+                                      {(selectedEvent?.eventGroups || []).map(
+                                        (group) => (
+                                          <option
+                                            key={group.name}
+                                            value={group.name}
+                                          >
+                                            {group.name}
+                                          </option>
+                                        ),
+                                      )}
+                                    </select>
+                                  </td>
 
-                                {/* Gender */}
-                                <td className="px-6 py-4">
-                                  <select
-                                    value={a.gender}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "gender",
-                                        e.target.value,
-                                      )
-                                    }
-                                    className={`bg-transparent font-semibold outline-none ${
-                                      a.gender === "woman"
-                                        ? "text-pink-600"
-                                        : "text-blue-600"
-                                    }`}
-                                  >
-                                    <option value="man">Man</option>
-                                    <option value="woman">Woman</option>
-                                  </select>
-                                </td>
+                                  {/* Gender */}
+                                  <td className="px-6 py-4">
+                                    <select
+                                      value={a.gender}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "gender",
+                                          e.target.value,
+                                        )
+                                      }
+                                      className={`bg-transparent font-semibold outline-none ${
+                                        a.gender === "woman"
+                                          ? "text-pink-600"
+                                          : "text-blue-600"
+                                      }`}
+                                    >
+                                      <option value="man">Man</option>
+                                      <option value="woman">Woman</option>
+                                    </select>
+                                  </td>
 
-                                {/* Table Number */}
-                                <td className="px-6 py-4 text-slate-800 font-mono">
-                                  {a.tableNumber || "-"}
-                                </td>
+                                  {/* Table Number */}
+                                  <td className="px-6 py-4 text-slate-800 font-mono">
+                                    {a.tableNumber || "-"}
+                                  </td>
 
-                                {/* Ethnicity */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.ethnicity}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "ethnicity",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="Syrian / Egyptian / Lebanese">
-                                      Syrian / Egyptian / Lebanese
-                                    </option>
-                                    <option value="Other Sephardic">
-                                      Other Sephardic
-                                    </option>
-                                    <option value="Ashkenaz">Ashkenaz</option>
-                                    <option value="Other">Other</option>
-                                  </select>
-                                </td>
+                                  {/* Ethnicity */}
+                                  <td className="px-6 py-4 text-slate-500">
+                                    <select
+                                      className="bg-transparent outline-none"
+                                      value={a.ethnicity}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "ethnicity",
+                                          e.target.value,
+                                        )
+                                      }
+                                    >
+                                      <option value="Syrian / Egyptian / Lebanese">
+                                        Syrian / Egyptian / Lebanese
+                                      </option>
+                                      <option value="Other Sephardic">
+                                        Other Sephardic
+                                      </option>
+                                      <option value="Ashkenaz">Ashkenaz</option>
+                                      <option value="Other">Other</option>
+                                    </select>
+                                  </td>
 
-                                {/* Other background */}
-                                <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                                  <textarea
-                                    className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                                    defaultValue={a.otherSpecify}
-                                    onBlur={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "otherSpecify",
-                                        e.target.value,
-                                      )
-                                    }
-                                  />
-                                </td>
+                                  {/* Other background */}
+                                  <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                                    <textarea
+                                      className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                                      defaultValue={a.otherSpecify}
+                                      onBlur={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "otherSpecify",
+                                          e.target.value,
+                                        )
+                                      }
+                                    />
+                                  </td>
 
-                                {/* Marital Status */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.maritalStatus}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "maritalStatus",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="Single">Single</option>
-                                    <option value="Divorced">Divorced</option>
-                                    <option value="Widowed">Widowed</option>
-                                  </select>
-                                </td>
+                                  {/* Marital Status */}
+                                  <td className="px-6 py-4 text-slate-500">
+                                    <select
+                                      className="bg-transparent outline-none"
+                                      value={a.maritalStatus}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "maritalStatus",
+                                          e.target.value,
+                                        )
+                                      }
+                                    >
+                                      <option value="Single">Single</option>
+                                      <option value="Divorced">Divorced</option>
+                                      <option value="Widowed">Widowed</option>
+                                    </select>
+                                  </td>
 
-                                {/* Kohen */}
-                                <td className="px-6 py-4 text-slate-500 text-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      a.isKohen === "yes" || a.isKohen === true
-                                    }
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "isKohen",
-                                        e.target.checked ? "yes" : "no",
-                                      )
-                                    }
-                                  />
-                                </td>
+                                  {/* Kohen */}
+                                  <td className="px-6 py-4 text-slate-500 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        a.isKohen === "yes" ||
+                                        a.isKohen === true
+                                      }
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "isKohen",
+                                          e.target.checked ? "yes" : "no",
+                                        )
+                                      }
+                                    />
+                                  </td>
 
-                                {/* Shomer Shabbat */}
-                                <td className="px-6 py-4 text-slate-500 text-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      a.isShomerShabbat === "yes" ||
-                                      a.isShomerShabbat === true
-                                    }
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "isShomerShabbat",
-                                        e.target.checked ? "yes" : "no",
-                                      )
-                                    }
-                                  />
-                                </td>
+                                  {/* Shomer Shabbat */}
+                                  <td className="px-6 py-4 text-slate-500 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        a.isShomerShabbat === "yes" ||
+                                        a.isShomerShabbat === true
+                                      }
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "isShomerShabbat",
+                                          e.target.checked ? "yes" : "no",
+                                        )
+                                      }
+                                    />
+                                  </td>
 
-                                {/* Shomer Kashrut */}
-                                <td className="px-6 py-4 text-slate-500 text-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      a.isShomerKashrut === "yes" ||
-                                      a.isShomerKashrut === true
-                                    }
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "isShomerKashrut",
-                                        e.target.checked ? "yes" : "no",
-                                      )
-                                    }
-                                  />
-                                </td>
+                                  {/* Shomer Kashrut */}
+                                  <td className="px-6 py-4 text-slate-500 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        a.isShomerKashrut === "yes" ||
+                                        a.isShomerKashrut === true
+                                      }
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "isShomerKashrut",
+                                          e.target.checked ? "yes" : "no",
+                                        )
+                                      }
+                                    />
+                                  </td>
 
-                                {/* Wants Girl to cover her hair */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.wantsCoveredHead}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "wantsCoveredHead",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="N/A">Not applicable</option>
-                                    <option value="yes">Yes</option>
-                                    <option value="no">No</option>
-                                    <option value="noPreference">
-                                      No preference
-                                    </option>
-                                  </select>
-                                </td>
+                                  {/* Wants Girl to cover her hair */}
+                                  <td className="px-6 py-4 text-slate-500">
+                                    <select
+                                      className="bg-transparent outline-none"
+                                      value={a.wantsCoveredHead}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "wantsCoveredHead",
+                                          e.target.value,
+                                        )
+                                      }
+                                    >
+                                      <option value="N/A">
+                                        Not applicable
+                                      </option>
+                                      <option value="yes">Yes</option>
+                                      <option value="no">No</option>
+                                      <option value="noPreference">
+                                        No preference
+                                      </option>
+                                    </select>
+                                  </td>
 
-                                {/* Girl to cover her hair */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.hairCovering}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "hairCovering",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="N/A">Not applicable</option>
-                                    <option value="willCoverHair">
-                                      Will cover hair
-                                    </option>
-                                    <option value="openFlexible">
-                                      Open / Flexible
-                                    </option>
-                                    <option value="notPlanning">
-                                      Not planning to cover hair
-                                    </option>
-                                  </select>
-                                </td>
+                                  {/* Girl to cover her hair */}
+                                  <td className="px-6 py-4 text-slate-500">
+                                    <select
+                                      className="bg-transparent outline-none"
+                                      value={a.hairCovering}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "hairCovering",
+                                          e.target.value,
+                                        )
+                                      }
+                                    >
+                                      <option value="N/A">
+                                        Not applicable
+                                      </option>
+                                      <option value="willCoverHair">
+                                        Will cover hair
+                                      </option>
+                                      <option value="openFlexible">
+                                        Open / Flexible
+                                      </option>
+                                      <option value="notPlanning">
+                                        Not planning to cover hair
+                                      </option>
+                                    </select>
+                                  </td>
 
-                                {/* Dress Style */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.dressStyle}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "dressStyle",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="N/A">Not applicable</option>
-                                    <option value="skirtsOnly">
-                                      Skirts only
-                                    </option>
-                                    <option value="skirtsPants">
-                                      Skirts + pants
-                                    </option>
-                                  </select>
-                                </td>
+                                  {/* Dress Style */}
+                                  <td className="px-6 py-4 text-slate-500">
+                                    <select
+                                      className="bg-transparent outline-none"
+                                      value={a.dressStyle}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "dressStyle",
+                                          e.target.value,
+                                        )
+                                      }
+                                    >
+                                      <option value="N/A">
+                                        Not applicable
+                                      </option>
+                                      <option value="skirtsOnly">
+                                        Skirts only
+                                      </option>
+                                      <option value="skirtsPants">
+                                        Skirts + pants
+                                      </option>
+                                    </select>
+                                  </td>
 
-                                {/* Open to Marital (Array Edit) */}
-                                <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                                  <textarea
-                                    className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                                    defaultValue={a.anythingElse}
-                                    onBlur={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "anythingElse",
-                                        e.target.value.map((s) => s.trim()),
-                                      )
-                                    }
-                                  />
-                                </td>
+                                  {/* Open to Marital (Array Edit) */}
+                                  <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                                    <textarea
+                                      className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                                      defaultValue={a.anythingElse}
+                                      onBlur={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "anythingElse",
+                                          e.target.value.map((s) => s.trim()),
+                                        )
+                                      }
+                                    />
+                                  </td>
 
-                                {/* Actions */}
-                                <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
-                                  <button
-                                    onClick={() => deleteAttendee(a.id, a.name)}
-                                    className="p-2 text-slate-300 hover:text-red-500 transition-all"
-                                  >
-                                    <UserMinus size={18} />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
+                                  {/* Actions */}
+                                  <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
+                                    <button
+                                      onClick={() =>
+                                        deleteAttendee(a.id, a.name)
+                                      }
+                                      className="p-2 text-slate-300 hover:text-red-500 transition-all"
+                                    >
+                                      <UserMinus size={18} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                         </tbody>
                       </table>
                     </div>
