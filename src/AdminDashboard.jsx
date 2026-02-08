@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, act } from "react";
 import { db } from "./firebase";
 import {
   collection,
   addDoc,
   documentId,
+  getDoc,
   getDocs,
   doc,
   updateDoc,
@@ -51,6 +52,8 @@ export default function AdminDashboard() {
     shomerShabbat: "all", // Advanced
     shomerKashrut: "all", // Advanced
     dressStyle: "all", // Advanced
+    startDate: "", // Master List
+    endDate: "", // Master List
   });
 
   const getHashgafaGroup = (user) => {
@@ -290,6 +293,19 @@ export default function AdminDashboard() {
     }
   };
 
+  const sendInvite = async (attendeeId, name) => {
+    //TODO - this should trigger an email via a Cloud Function in production, but for now we'll just update the status in Firestore
+    if (window.confirm(`Send invite to ${name}?`)) {
+      try {
+        await updateDoc(doc(db, "registrations", attendeeId), {
+          status: "invited",
+        });
+      } catch (err) {
+        console.error("Error sending invite:", err);
+      }
+    }
+  };
+
   const deleteAttendee = async (attendeeId, name) => {
     if (window.confirm(`Remove ${name} from this event?`)) {
       try {
@@ -306,6 +322,31 @@ export default function AdminDashboard() {
 
     navigator.clipboard.writeText(registrationUrl);
     alert("Link copied to clipboard!");
+  };
+
+  const addUsersToEvent = async () => {
+    if (!targetEventId) return alert("Select an event first");
+
+    const confirmBatch = window.confirm(
+      `Add ${selectedUserIds.length} users to this event?`,
+    );
+    if (!confirmBatch) return;
+
+    try {
+      for (const userId of selectedUserIds) {
+        const user = masterUsers.find((u) => u.id === userId);
+        // Logic to add to your 'attendees' subcollection or collection
+        await addDoc(collection(db, "events", targetEventId, "attendees"), {
+          ...user,
+          addedAt: serverTimestamp(),
+          status: "confirmed", // or "pending"
+        });
+      }
+      alert("Users added successfully!");
+      setSelectedUserIds([]);
+    } catch (error) {
+      console.error("Error adding users:", error);
+    }
   };
 
   const addSelectedToEvent = async () => {
@@ -561,141 +602,9 @@ export default function AdminDashboard() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {activeTab === "master" ? (
-          /* MASTER LIST UI */
-          <div className="flex-1 p-8 overflow-auto">
-            <header className="flex justify-between items-end mb-8">
-              <div>
-                <h1 className="text-3xl font-bold">Master Singles Database</h1>
-                <div className="flex gap-4 mt-4">
-                  <select
-                    className="p-2 border rounded text-sm"
-                    value={masterFilter}
-                    onChange={(e) => setMasterFilter(e.target.value)}
-                  >
-                    <option value="all">Show Everyone</option>
-                    <option value="notInEvent">Not in target event</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex gap-4 items-end">
-                <div>
-                  <label className="text-[10px] font-bold text-blue-900 uppercase block mb-1">
-                    Target Event
-                  </label>
-                  <select
-                    className="p-2 rounded border text-sm"
-                    value={targetEventId}
-                    onChange={(e) => setTargetEventId(e.target.value)}
-                  >
-                    <option value="">Select an event...</option>
-                    {events.map((ev) => (
-                      <option key={ev.id} value={ev.id}>
-                        {ev.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  onClick={addSelectedToEvent}
-                  disabled={!targetEventId || selectedUserIds.length === 0}
-                  className="bg-blue-900 text-white px-4 py-2 rounded font-bold disabled:opacity-50"
-                >
-                  Add {selectedUserIds.length} to Event
-                </button>
-              </div>
-            </header>
-
-            <table className="w-full bg-white rounded-xl shadow-sm border border-slate-200 border-collapse overflow-hidden">
-              <thead>
-                <tr className="bg-slate-50 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-200">
-                  <th className="p-4 text-center w-16">Select</th>
-                  <th className="p-4 text-left">Singles Details</th>
-                  <th className="p-4 text-left">Event History</th>
-                </tr>
-              </thead>
-              <tbody>
-                {masterUsers.map((user) => {
-                  // 1. IMPROVED DUPLICATE PREVENTION: Check against the GLOBAL registration list
-                  const alreadyInEvent = allRegistrations.some(
-                    (reg) =>
-                      reg.userId === user.id && reg.eventId === targetEventId,
-                  );
-
-                  // 2. FETCH REAL HISTORY: Find every event this user has ever registered for
-                  const userHistory = events.filter((ev) =>
-                    allRegistrations.some(
-                      (reg) => reg.userId === user.id && reg.eventId === ev.id,
-                    ),
-                  );
-
-                  if (masterFilter === "notInEvent" && alreadyInEvent)
-                    return null;
-
-                  return (
-                    <tr
-                      key={user.id}
-                      className={`border-t transition-colors ${alreadyInEvent ? "bg-slate-50 opacity-50" : "hover:bg-slate-50"}`}
-                    >
-                      <td className="p-4 text-center">
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4 accent-blue-900"
-                          disabled={alreadyInEvent || !targetEventId} // Disable if no event selected or already in
-                          checked={selectedUserIds.includes(user.id)}
-                          onChange={(e) => {
-                            if (e.target.checked)
-                              setSelectedUserIds([...selectedUserIds, user.id]);
-                            else
-                              setSelectedUserIds(
-                                selectedUserIds.filter((id) => id !== user.id),
-                              );
-                          }}
-                        />
-                      </td>
-                      <td className="p-4">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-slate-900">
-                            {user.firstName} {user.lastName}
-                          </span>
-                          <span className="text-xs text-slate-500">
-                            {user.age} years old • {user.gender}
-                          </span>
-                          {alreadyInEvent && (
-                            <span className="mt-1 text-[9px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded w-fit">
-                              ALREADY IN SELECTED EVENT
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex flex-wrap gap-1">
-                          {userHistory.length > 0 ? (
-                            userHistory.map((ev) => (
-                              <span
-                                key={ev.id}
-                                className={`px-2 py-1 rounded text-[10px] font-medium ${ev.active ? "bg-green-100 text-green-700 border border-green-200" : "bg-slate-100 text-slate-500"}`}
-                              >
-                                {ev.name}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-slate-300 italic text-xs">
-                              No history
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="flex flex-col md:flex-row h-screen bg-slate-50 overflow-hidden">
-            {/* SIDEBAR: Event List */}
+        <div className="flex flex-col md:flex-row h-screen bg-slate-50 overflow-hidden">
+          {/* SIDEBAR: Event List */}
+          {activeTab === "events" && (
             <div
               className={`${
                 selectedEvent ? "hidden md:flex" : "flex"
@@ -781,18 +690,20 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
+          )}
 
-            {/* MAIN CONTENT: Event Details */}
-            <div className="flex-1 p-4 overflow-auto">
-              {selectedEvent ? (
-                <div className="w-full mx-auto">
-                  <button
-                    onClick={() => setSelectedEvent(null)}
-                    className="md:hidden mb-4 text-blue-600 font-bold flex items-center gap-2"
-                  >
-                    ← Back to Events
-                  </button>
-                  {/* HEADER SECTION */}
+          {/* MAIN CONTENT: Event Details */}
+          <div className="flex-1 p-4 overflow-auto">
+            {selectedEvent || activeTab === "master" ? (
+              <div className="w-full mx-auto">
+                <button
+                  onClick={() => setSelectedEvent(null)}
+                  className="md:hidden mb-4 text-blue-600 font-bold flex items-center gap-2"
+                >
+                  ← Back to Events
+                </button>
+                {/* HEADER SECTION */}
+                {activeTab === "events" && (
                   <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-6 mb-10 pb-6 border-b border-slate-200">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -1020,299 +931,470 @@ export default function AdminDashboard() {
                       </button>
                     </div>
                   </div>
+                )}
 
-                  {/* FILTER SYSTEM */}
-                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6">
-                    <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">
-                          Hashgafa Group
-                        </label>
-                        <select
-                          className="w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50"
-                          value={filters.hashgafa}
+                {/* FILTER SYSTEM */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6">
+                  <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">
+                        Hashgafa Group
+                      </label>
+                      <select
+                        className="w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50"
+                        value={filters.hashgafa}
+                        onChange={(e) =>
+                          setFilters({ ...filters, hashgafa: e.target.value })
+                        }
+                      >
+                        <option value="all">All Groups</option>
+                        <option value="Expected">
+                          Hair-Covering Expected (Purple)
+                        </option>
+                        <option value="Flexible">Flexible (Green)</option>
+                        <option value="None">
+                          No Hair-Covering Expected (Blue)
+                        </option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-blue-600 uppercase mb-2 block">
+                        Men's Age Range
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          placeholder="Min"
+                          className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                          value={filters.minAgeMan}
                           onChange={(e) =>
-                            setFilters({ ...filters, hashgafa: e.target.value })
+                            setFilters({
+                              ...filters,
+                              minAgeMan: e.target.value,
+                            })
                           }
-                        >
-                          <option value="all">All Groups</option>
-                          <option value="Expected">
-                            Hair-Covering Expected (Purple)
-                          </option>
-                          <option value="Flexible">Flexible (Green)</option>
-                          <option value="None">
-                            No Hair-Covering Expected (Blue)
-                          </option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] font-bold text-blue-600 uppercase mb-2 block">
-                          Men's Age Range
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="number"
-                            placeholder="Min"
-                            className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
-                            value={filters.minAgeMan}
-                            onChange={(e) =>
-                              setFilters({
-                                ...filters,
-                                minAgeMan: e.target.value,
-                              })
-                            }
-                          />
-                          <input
-                            type="number"
-                            placeholder="Max"
-                            className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
-                            value={filters.maxAgeMan}
-                            onChange={(e) =>
-                              setFilters({
-                                ...filters,
-                                maxAgeMan: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-2">
-                          <label className="text-[10px] font-bold text-pink-600 uppercase block">
-                            Women's Age Range
-                          </label>
-                          <button
-                            onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
-                            className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
-                          >
-                            {isAdvancedOpen
-                              ? "Close Advanced"
-                              : "Advanced Filters"}
-                            <ChevronDown
-                              size={14}
-                              className={`transition-transform ${isAdvancedOpen ? "rotate-180" : ""}`}
-                            />
-                          </button>
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            type="number"
-                            placeholder="Min"
-                            className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
-                            value={filters.minAgeWoman}
-                            onChange={(e) =>
-                              setFilters({
-                                ...filters,
-                                minAgeWoman: e.target.value,
-                              })
-                            }
-                          />
-                          <input
-                            type="number"
-                            placeholder="Max"
-                            className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
-                            value={filters.maxAgeWoman}
-                            onChange={(e) =>
-                              setFilters({
-                                ...filters,
-                                maxAgeWoman: e.target.value,
-                              })
-                            }
-                          />
-                        </div>
+                        />
+                        <input
+                          type="number"
+                          placeholder="Max"
+                          className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                          value={filters.maxAgeMan}
+                          onChange={(e) =>
+                            setFilters({
+                              ...filters,
+                              maxAgeMan: e.target.value,
+                            })
+                          }
+                        />
                       </div>
                     </div>
 
-                    {/* ADVANCED FILTERS (Collapsible) */}
-                    {isAdvancedOpen && (
-                      <div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-slate-50/50 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-                        {/* Gender */}
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                            Gender
-                          </label>
-                          <select
-                            className="w-full p-2 border rounded text-xs"
-                            value={filters.gender}
-                            onChange={(e) =>
-                              setFilters({ ...filters, gender: e.target.value })
-                            }
-                          >
-                            <option value="all">All</option>
-                            <option value="man">Men</option>
-                            <option value="woman">Women</option>
-                          </select>
-                        </div>
-
-                        {/* Ethnicity */}
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                            Ethnicity
-                          </label>
-                          <select
-                            className="w-full p-2 border rounded text-xs"
-                            value={filters.ethnicity}
-                            onChange={(e) =>
-                              setFilters({
-                                ...filters,
-                                ethnicity: e.target.value,
-                              })
-                            }
-                          >
-                            <option value="all">Any</option>
-                            <option value="Syrian / Egyptian / Lebanese">
-                              S/E/L
-                            </option>
-                            <option value="Other Sephardic">
-                              Other Sephardic
-                            </option>
-                            <option value="Ashkenaz">Ashkenaz</option>
-                          </select>
-                        </div>
-
-                        {/* Marital */}
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                            Marital
-                          </label>
-                          <select
-                            className="w-full p-2 border rounded text-xs"
-                            value={filters.maritalStatus}
-                            onChange={(e) =>
-                              setFilters({
-                                ...filters,
-                                maritalStatus: e.target.value,
-                              })
-                            }
-                          >
-                            <option value="all">Any</option>
-                            <option value="Single">Single</option>
-                            <option value="Divorced">Divorced</option>
-                          </select>
-                        </div>
-
-                        {/* Boolean Filters (Shabbat, Kashrut, Kohen) */}
-                        {["isKohen", "shomerShabbat", "shomerKashrut"].map(
-                          (key) => (
-                            <div key={key}>
-                              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                                {key
-                                  .replace("is", "")
-                                  .replace("shomer", "Shomer ")}
-                              </label>
-                              <select
-                                className="w-full p-2 border rounded text-xs"
-                                value={filters[key]}
-                                onChange={(e) =>
-                                  setFilters({
-                                    ...filters,
-                                    [key]: e.target.value,
-                                  })
-                                }
-                              >
-                                <option value="all">Any</option>
-                                <option value="yes">Yes</option>
-                                <option value="no">No</option>
-                              </select>
-                            </div>
-                          ),
-                        )}
-
-                        {/* Dress Style */}
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
-                            Dress Style
-                          </label>
-                          <select
-                            className="w-full p-2 border rounded text-xs"
-                            value={filters.dressStyle}
-                            onChange={(e) =>
-                              setFilters({
-                                ...filters,
-                                dressStyle: e.target.value,
-                              })
-                            }
-                          >
-                            <option value="all">Any</option>
-                            <option value="skirtsOnly">Skirts Only</option>
-                            <option value="skirtsPants">Skirts + Pants</option>
-                          </select>
-                        </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="text-[10px] font-bold text-pink-600 uppercase block">
+                          Women's Age Range
+                        </label>
+                        <button
+                          onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+                          className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
+                        >
+                          {isAdvancedOpen
+                            ? "Close Advanced"
+                            : "Advanced Filters"}
+                          <ChevronDown
+                            size={14}
+                            className={`transition-transform ${isAdvancedOpen ? "rotate-180" : ""}`}
+                          />
+                        </button>
                       </div>
-                    )}
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          placeholder="Min"
+                          className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                          value={filters.minAgeWoman}
+                          onChange={(e) =>
+                            setFilters({
+                              ...filters,
+                              minAgeWoman: e.target.value,
+                            })
+                          }
+                        />
+                        <input
+                          type="number"
+                          placeholder="Max"
+                          className="w-1/2 p-2 border border-slate-200 rounded-lg text-sm"
+                          value={filters.maxAgeWoman}
+                          onChange={(e) =>
+                            setFilters({
+                              ...filters,
+                              maxAgeWoman: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">
+                        Signup Date Range
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          className="p-2 border border-slate-200 rounded text-xs outline-none"
+                          value={filters.startDate}
+                          onChange={(e) =>
+                            setFilters({
+                              ...filters,
+                              startDate: e.target.value,
+                            })
+                          }
+                        />
+                        <span className="text-slate-400">-</span>
+                        <input
+                          type="date"
+                          className="p-2 border border-slate-200 rounded text-xs outline-none"
+                          value={filters.endDate}
+                          onChange={(e) =>
+                            setFilters({ ...filters, endDate: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  {/* TABLE SECTION */}
-                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm min-w-450">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
-                          <tr>
-                            <th className="px-6 py-4 sticky left-0 bg-slate-50 z-20">
-                              Name / Age
+                  {/* ADVANCED FILTERS (Collapsible) */}
+                  {isAdvancedOpen && (
+                    <div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-slate-50/50 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                      {/* Gender */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                          Gender
+                        </label>
+                        <select
+                          className="w-full p-2 border rounded text-xs"
+                          value={filters.gender}
+                          onChange={(e) =>
+                            setFilters({ ...filters, gender: e.target.value })
+                          }
+                        >
+                          <option value="all">All</option>
+                          <option value="man">Men</option>
+                          <option value="woman">Women</option>
+                        </select>
+                      </div>
+
+                      {/* Ethnicity */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                          Ethnicity
+                        </label>
+                        <select
+                          className="w-full p-2 border rounded text-xs"
+                          value={filters.ethnicity}
+                          onChange={(e) =>
+                            setFilters({
+                              ...filters,
+                              ethnicity: e.target.value,
+                            })
+                          }
+                        >
+                          <option value="all">Any</option>
+                          <option value="Syrian / Egyptian / Lebanese">
+                            S/E/L
+                          </option>
+                          <option value="Other Sephardic">
+                            Other Sephardic
+                          </option>
+                          <option value="Ashkenaz">Ashkenaz</option>
+                        </select>
+                      </div>
+
+                      {/* Marital */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                          Marital
+                        </label>
+                        <select
+                          className="w-full p-2 border rounded text-xs"
+                          value={filters.maritalStatus}
+                          onChange={(e) =>
+                            setFilters({
+                              ...filters,
+                              maritalStatus: e.target.value,
+                            })
+                          }
+                        >
+                          <option value="all">Any</option>
+                          <option value="Single">Single</option>
+                          <option value="Divorced">Divorced</option>
+                        </select>
+                      </div>
+
+                      {/* Boolean Filters (Shabbat, Kashrut, Kohen) */}
+                      {["isKohen", "shomerShabbat", "shomerKashrut"].map(
+                        (key) => (
+                          <div key={key}>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                              {key
+                                .replace("is", "")
+                                .replace("shomer", "Shomer ")}
+                            </label>
+                            <select
+                              className="w-full p-2 border rounded text-xs"
+                              value={filters[key]}
+                              onChange={(e) =>
+                                setFilters({
+                                  ...filters,
+                                  [key]: e.target.value,
+                                })
+                              }
+                            >
+                              <option value="all">Any</option>
+                              <option value="yes">Yes</option>
+                              <option value="no">No</option>
+                            </select>
+                          </div>
+                        ),
+                      )}
+
+                      {/* Dress Style */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                          Dress Style
+                        </label>
+                        <select
+                          className="w-full p-2 border rounded text-xs"
+                          value={filters.dressStyle}
+                          onChange={(e) =>
+                            setFilters({
+                              ...filters,
+                              dressStyle: e.target.value,
+                            })
+                          }
+                        >
+                          <option value="all">Any</option>
+                          <option value="skirtsOnly">Skirts Only</option>
+                          <option value="skirtsPants">Skirts + Pants</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                  {selectedUserIds.length > 0 && activeTab === "master" && (
+                    <div className="bg-blue-500 text-white p-4 rounded flex items-center justify-between">
+                      <span className="font-bold">
+                        {selectedUserIds.length} user(s) selected
+                      </span>
+                      <div className="flex gap-4 items-center">
+                        <select
+                          className="text-black text-sm p-1.5 rounded border border-slate-300"
+                          value={targetEventId}
+                          onChange={(e) => setTargetEventId(e.target.value)}
+                        >
+                          <option value="">Select Target Event...</option>
+                          {events.map((ev) => (
+                            <option key={ev.id} value={ev.id}>
+                              {ev.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={addUsersToEvent}
+                          className="bg-green-500 hover:bg-green-600 px-4 py-1.5 rounded font-bold text-sm transition"
+                        >
+                          Add to Event
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* TABLE SECTION */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm min-w-450">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
+                        <tr>
+                          {activeTab === "master" && (
+                            <th className="px-6 py-4">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  masterUsers.length > 0 &&
+                                  masterUsers.every((user) =>
+                                    selectedUserIds.includes(user.id),
+                                  )
+                                }
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    const allVisibleIds = masterUsers.map(
+                                      (u) => u.id,
+                                    );
+                                    setSelectedUserIds([
+                                      ...new Set([
+                                        ...selectedUserIds,
+                                        ...allVisibleIds,
+                                      ]),
+                                    ]);
+                                  } else {
+                                    const visibleIds = masterUsers.map(
+                                      (u) => u.id,
+                                    );
+                                    setSelectedUserIds((prev) =>
+                                      prev.filter(
+                                        (id) => !visibleIds.includes(id),
+                                      ),
+                                    );
+                                  }
+                                }}
+                              />
                             </th>
-                            <th className="px-6 py-4">Hashgafa</th>
+                          )}
+                          <th className="px-6 py-4 sticky left-0 bg-slate-50 z-20">
+                            Name / Age
+                          </th>
+                          <th className="px-6 py-4">Hashgafa</th>
+                          {activeTab === "master" && (
+                            <th className="px-6 py-4">Signup Date</th>
+                          )}
+                          {activeTab === "events" && (
                             <th className="px-6 py-4">Confirmation Status</th>
+                          )}
+                          {activeTab === "events" && (
                             <th className="px-6 py-4">Check-In</th>
+                          )}
+                          {activeTab === "events" && (
                             <th className="px-6 py-4">Group Assignment</th>
-                            <th className="px-6 py-4">Gender</th>
+                          )}
+                          <th className="px-6 py-4">Gender</th>
+                          {activeTab === "events" && (
                             <th className="px-6 py-4">Table Number</th>
-                            <th className="px-6 py-4">Ethnicity</th>
-                            <th className="px-6 py-4">Other Background</th>
-                            <th className="px-6 py-4">Marital Status</th>
-                            <th className="px-6 py-4">Kohen</th>
-                            <th className="px-6 py-4">Shomer Shabbat</th>
-                            <th className="px-6 py-4">Shomer Kashrut</th>
-                            <th className="px-6 py-4">
-                              Wants covered head (Male)
-                            </th>
-                            <th className="px-6 py-4">
-                              Wants to cover head (Female)
-                            </th>
-                            <th className="px-6 py-4">Dress Style (Female)</th>
-                            <th className="px-6 py-4">Anything else</th>
-                            <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
-                              Actions
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {filteredAttendees
-                            .sort((a, b) =>
-                              (a.groupId || "").localeCompare(b.groupId || ""),
-                            )
-                            .map((a, index) => {
-                              const hashgafa = getHashgafaGroup(a);
-                              const isNewGroup =
-                                index > 0 &&
-                                a.groupId !==
-                                  filteredAttendees[index - 1].groupId;
-                              return (
-                                <tr
-                                  key={a.id}
-                                  className={`hover:bg-slate-50 transition-colors ${isNewGroup ? "border-t-4 border-slate-300" : ""}`}
-                                >
-                                  {/* Permanent Name Column */}
-                                  <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
-                                    <p className="font-bold text-slate-900">
-                                      {a.firstName} {a.lastName}
-                                    </p>
-                                    <p className="text-xs text-slate-400">
-                                      {a.age}y • {a.gender}
-                                    </p>
-                                  </td>
+                          )}
+                          <th className="px-6 py-4">Ethnicity</th>
+                          <th className="px-6 py-4">Other Background</th>
+                          <th className="px-6 py-4">Marital Status</th>
+                          <th className="px-6 py-4">Kohen</th>
+                          <th className="px-6 py-4">Shomer Shabbat</th>
+                          <th className="px-6 py-4">Shomer Kashrut</th>
+                          <th className="px-6 py-4">
+                            Wants covered head (Male)
+                          </th>
+                          <th className="px-6 py-4">
+                            Wants to cover head (Female)
+                          </th>
+                          <th className="px-6 py-4">Dress Style (Female)</th>
+                          <th className="px-6 py-4">Anything else</th>
+                          <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(() => {
+                          // Determine which list we are actually using
+                          const listToDisplay = (
+                            activeTab === "master"
+                              ? masterUsers
+                              : filteredAttendees
+                          ).filter((user) => {
+                            if (!filters.startDate && !filters.endDate)
+                              return true;
 
+                            // Convert Firestore timestamp to JS Date
+                            const signupDate = user.createdAt?.toDate
+                              ? user.createdAt.toDate()
+                              : new Date(user.createdAt);
+                            const start = filters.startDate
+                              ? new Date(filters.startDate)
+                              : null;
+                            const end = filters.endDate
+                              ? new Date(filters.endDate)
+                              : null;
+
+                            if (start && signupDate < start) return false;
+                            if (end) {
+                              // Set end date to 23:59:59 to include the entire day
+                              const adjustedEnd = new Date(end);
+                              adjustedEnd.setHours(23, 59, 59);
+                              if (signupDate > adjustedEnd) return false;
+                            }
+                            return true;
+                          });
+
+                          // Apply sorting (By Name for Master, By Group for Events)
+                          const sortedList = [...listToDisplay].sort((a, b) => {
+                            if (activeTab === "events") {
+                              return (a.groupId || "").localeCompare(
+                                b.groupId || "",
+                              );
+                            }
+                            return (a.firstName || "").localeCompare(
+                              b.firstName || "",
+                            );
+                          });
+
+                          return sortedList.map((a, index) => {
+                            const hashgafa = getHashgafaGroup(a);
+
+                            // Fix the "New Group" logic to reference the correct array
+                            let isNewGroup = false;
+                            if (activeTab === "events" && index > 0) {
+                              // Compare against the previous item in the SORTED list, not filteredAttendees
+                              isNewGroup =
+                                a.groupId !== sortedList[index - 1].groupId;
+                            }
+
+                            return (
+                              <tr
+                                key={a.id}
+                                className={`hover:bg-slate-50 transition-colors ${isNewGroup ? "border-t-4 border-slate-300" : ""}`}
+                              >
+                                {activeTab === "master" && (
                                   <td className="px-6 py-4">
-                                    <span
-                                      className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
-                                    >
-                                      {hashgafa.label.toUpperCase()}
-                                    </span>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedUserIds.includes(a.id)}
+                                      onChange={() => {
+                                        setSelectedUserIds((prev) =>
+                                          prev.includes(a.id)
+                                            ? prev.filter((id) => id !== a.id)
+                                            : [...prev, a.id],
+                                        );
+                                      }}
+                                    />
                                   </td>
+                                )}
+                                {/* Permanent Name Column */}
+                                <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
+                                  <p className="font-bold text-slate-900">
+                                    {a.firstName} {a.lastName}
+                                  </p>
+                                  <p className="text-xs text-slate-400">
+                                    {a.age}y • {a.gender}
+                                  </p>
+                                </td>
 
-                                  {/* Confirmation Status, possible values are: Invited, Confirmed, Declined, Waitlist, and No Response */}
+                                {/* Hashgafa Group */}
+                                <td className="px-6 py-4">
+                                  <span
+                                    className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
+                                  >
+                                    {hashgafa.label.toUpperCase()}
+                                  </span>
+                                </td>
+
+                                {/* Signup Date */}
+                                {activeTab === "master" && (
+                                  <td className="px-6 py-4 text-slate-500">
+                                    {a.createdAt?.toDate().toLocaleString() ||
+                                      "-"}
+                                  </td>
+                                )}
+
+                                {/* Confirmation Status, possible values are: Invited, Confirmed, Declined, Waitlist, and No Response */}
+                                {activeTab === "events" && (
                                   <td className="px-6 py-4">
                                     <select
                                       value={a.status}
@@ -1325,6 +1407,9 @@ export default function AdminDashboard() {
                                       }
                                       className="text-xs font-bold text-blue-900"
                                     >
+                                      <option value="pending invite">
+                                        Pending Invite
+                                      </option>
                                       <option value="waitlist">Waitlist</option>
                                       <option value="invited">Invited</option>
                                       <option value="confirmed">
@@ -1335,9 +1420,24 @@ export default function AdminDashboard() {
                                         No Response
                                       </option>
                                     </select>
+                                    {a.status === "pending invite" && (
+                                      <button
+                                        onClick={() =>
+                                          sendInvite(
+                                            a.id,
+                                            `${a.firstName} ${a.lastName}`,
+                                          )
+                                        }
+                                        className="ml-2 text-xs text-blue-600 hover:underline"
+                                      >
+                                        Invite
+                                      </button>
+                                    )}
                                   </td>
+                                )}
 
-                                  {/* Check-In */}
+                                {/* Check-In */}
+                                {activeTab === "events" && (
                                   <td className="px-6 py-4">
                                     <button
                                       onClick={() =>
@@ -1352,8 +1452,10 @@ export default function AdminDashboard() {
                                       {a.checkedIn ? "CHECKED IN" : "PENDING"}
                                     </button>
                                   </td>
+                                )}
 
-                                  {/* Group Assignment */}
+                                {/* Group Assignment */}
+                                {activeTab === "events" && (
                                   <td className="px-6 py-4">
                                     <select
                                       /* 1. We look at the groupId stored on this registration */
@@ -1381,277 +1483,272 @@ export default function AdminDashboard() {
                                       )}
                                     </select>
                                   </td>
+                                )}
 
-                                  {/* Gender */}
-                                  <td className="px-6 py-4">
-                                    <select
-                                      value={a.gender}
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "gender",
-                                          e.target.value,
-                                        )
-                                      }
-                                      className={`bg-transparent font-semibold outline-none ${
-                                        a.gender === "woman"
-                                          ? "text-pink-600"
-                                          : "text-blue-600"
-                                      }`}
-                                    >
-                                      <option value="man">Man</option>
-                                      <option value="woman">Woman</option>
-                                    </select>
-                                  </td>
+                                {/* Gender */}
+                                <td className="px-6 py-4">
+                                  <select
+                                    value={a.gender}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "gender",
+                                        e.target.value,
+                                      )
+                                    }
+                                    className={`bg-transparent font-semibold outline-none ${
+                                      a.gender === "woman"
+                                        ? "text-pink-600"
+                                        : "text-blue-600"
+                                    }`}
+                                  >
+                                    <option value="man">Man</option>
+                                    <option value="woman">Woman</option>
+                                  </select>
+                                </td>
 
-                                  {/* Table Number */}
+                                {/* Table Number */}
+                                {activeTab === "events" && (
                                   <td className="px-6 py-4 text-slate-800 font-mono">
                                     {a.tableNumber || "-"}
                                   </td>
+                                )}
 
-                                  {/* Ethnicity */}
-                                  <td className="px-6 py-4 text-slate-500">
-                                    <select
-                                      className="bg-transparent outline-none"
-                                      value={a.ethnicity}
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "ethnicity",
-                                          e.target.value,
-                                        )
-                                      }
-                                    >
-                                      <option value="Syrian / Egyptian / Lebanese">
-                                        Syrian / Egyptian / Lebanese
-                                      </option>
-                                      <option value="Other Sephardic">
-                                        Other Sephardic
-                                      </option>
-                                      <option value="Ashkenaz">Ashkenaz</option>
-                                      <option value="Other">Other</option>
-                                    </select>
-                                  </td>
+                                {/* Ethnicity */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.ethnicity}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "ethnicity",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="Syrian / Egyptian / Lebanese">
+                                      Syrian / Egyptian / Lebanese
+                                    </option>
+                                    <option value="Other Sephardic">
+                                      Other Sephardic
+                                    </option>
+                                    <option value="Ashkenaz">Ashkenaz</option>
+                                    <option value="Other">Other</option>
+                                  </select>
+                                </td>
 
-                                  {/* Other background */}
-                                  <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                                    <textarea
-                                      className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                                      defaultValue={a.otherSpecify}
-                                      onBlur={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "otherSpecify",
-                                          e.target.value,
-                                        )
-                                      }
-                                    />
-                                  </td>
+                                {/* Other background */}
+                                <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                                  <textarea
+                                    className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                                    defaultValue={a.otherSpecify}
+                                    onBlur={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "otherSpecify",
+                                        e.target.value,
+                                      )
+                                    }
+                                  />
+                                </td>
 
-                                  {/* Marital Status */}
-                                  <td className="px-6 py-4 text-slate-500">
-                                    <select
-                                      className="bg-transparent outline-none"
-                                      value={a.maritalStatus}
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "maritalStatus",
-                                          e.target.value,
-                                        )
-                                      }
-                                    >
-                                      <option value="Single">Single</option>
-                                      <option value="Divorced">Divorced</option>
-                                      <option value="Widowed">Widowed</option>
-                                    </select>
-                                  </td>
+                                {/* Marital Status */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.maritalStatus}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "maritalStatus",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="Single">Single</option>
+                                    <option value="Divorced">Divorced</option>
+                                    <option value="Widowed">Widowed</option>
+                                  </select>
+                                </td>
 
-                                  {/* Kohen */}
-                                  <td className="px-6 py-4 text-slate-500 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={
-                                        a.isKohen === "yes" ||
-                                        a.isKohen === true
-                                      }
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "isKohen",
-                                          e.target.checked ? "yes" : "no",
-                                        )
-                                      }
-                                    />
-                                  </td>
+                                {/* Kohen */}
+                                <td className="px-6 py-4 text-slate-500 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      a.isKohen === "yes" || a.isKohen === true
+                                    }
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "isKohen",
+                                        e.target.checked ? "yes" : "no",
+                                      )
+                                    }
+                                  />
+                                </td>
 
-                                  {/* Shomer Shabbat */}
-                                  <td className="px-6 py-4 text-slate-500 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={
-                                        a.isShomerShabbat === "yes" ||
-                                        a.isShomerShabbat === true
-                                      }
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "isShomerShabbat",
-                                          e.target.checked ? "yes" : "no",
-                                        )
-                                      }
-                                    />
-                                  </td>
+                                {/* Shomer Shabbat */}
+                                <td className="px-6 py-4 text-slate-500 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      a.isShomerShabbat === "yes" ||
+                                      a.isShomerShabbat === true
+                                    }
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "isShomerShabbat",
+                                        e.target.checked ? "yes" : "no",
+                                      )
+                                    }
+                                  />
+                                </td>
 
-                                  {/* Shomer Kashrut */}
-                                  <td className="px-6 py-4 text-slate-500 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={
-                                        a.isShomerKashrut === "yes" ||
-                                        a.isShomerKashrut === true
-                                      }
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "isShomerKashrut",
-                                          e.target.checked ? "yes" : "no",
-                                        )
-                                      }
-                                    />
-                                  </td>
+                                {/* Shomer Kashrut */}
+                                <td className="px-6 py-4 text-slate-500 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      a.isShomerKashrut === "yes" ||
+                                      a.isShomerKashrut === true
+                                    }
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "isShomerKashrut",
+                                        e.target.checked ? "yes" : "no",
+                                      )
+                                    }
+                                  />
+                                </td>
 
-                                  {/* Wants Girl to cover her hair */}
-                                  <td className="px-6 py-4 text-slate-500">
-                                    <select
-                                      className="bg-transparent outline-none"
-                                      value={a.wantsCoveredHead}
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "wantsCoveredHead",
-                                          e.target.value,
-                                        )
-                                      }
-                                    >
-                                      <option value="N/A">
-                                        Not applicable
-                                      </option>
-                                      <option value="yes">Yes</option>
-                                      <option value="no">No</option>
-                                      <option value="noPreference">
-                                        No preference
-                                      </option>
-                                    </select>
-                                  </td>
+                                {/* Wants Girl to cover her hair */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.wantsCoveredHead}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "wantsCoveredHead",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="N/A">Not applicable</option>
+                                    <option value="yes">Yes</option>
+                                    <option value="no">No</option>
+                                    <option value="noPreference">
+                                      No preference
+                                    </option>
+                                  </select>
+                                </td>
 
-                                  {/* Girl to cover her hair */}
-                                  <td className="px-6 py-4 text-slate-500">
-                                    <select
-                                      className="bg-transparent outline-none"
-                                      value={a.hairCovering}
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "hairCovering",
-                                          e.target.value,
-                                        )
-                                      }
-                                    >
-                                      <option value="N/A">
-                                        Not applicable
-                                      </option>
-                                      <option value="willCoverHair">
-                                        Will cover hair
-                                      </option>
-                                      <option value="openFlexible">
-                                        Open / Flexible
-                                      </option>
-                                      <option value="notPlanning">
-                                        Not planning to cover hair
-                                      </option>
-                                    </select>
-                                  </td>
+                                {/* Girl to cover her hair */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.hairCovering}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "hairCovering",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="N/A">Not applicable</option>
+                                    <option value="willCoverHair">
+                                      Will cover hair
+                                    </option>
+                                    <option value="openFlexible">
+                                      Open / Flexible
+                                    </option>
+                                    <option value="notPlanning">
+                                      Not planning to cover hair
+                                    </option>
+                                  </select>
+                                </td>
 
-                                  {/* Dress Style */}
-                                  <td className="px-6 py-4 text-slate-500">
-                                    <select
-                                      className="bg-transparent outline-none"
-                                      value={a.dressStyle}
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "dressStyle",
-                                          e.target.value,
-                                        )
-                                      }
-                                    >
-                                      <option value="N/A">
-                                        Not applicable
-                                      </option>
-                                      <option value="skirtsOnly">
-                                        Skirts only
-                                      </option>
-                                      <option value="skirtsPants">
-                                        Skirts + pants
-                                      </option>
-                                    </select>
-                                  </td>
+                                {/* Dress Style */}
+                                <td className="px-6 py-4 text-slate-500">
+                                  <select
+                                    className="bg-transparent outline-none"
+                                    value={a.dressStyle}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "dressStyle",
+                                        e.target.value,
+                                      )
+                                    }
+                                  >
+                                    <option value="N/A">Not applicable</option>
+                                    <option value="skirtsOnly">
+                                      Skirts only
+                                    </option>
+                                    <option value="skirtsPants">
+                                      Skirts + pants
+                                    </option>
+                                  </select>
+                                </td>
 
-                                  {/* Open to Marital (Array Edit) */}
-                                  <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                                    <textarea
-                                      className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                                      defaultValue={a.anythingElse}
-                                      onBlur={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "anythingElse",
-                                          e.target.value.map((s) => s.trim()),
-                                        )
-                                      }
-                                    />
-                                  </td>
+                                {/* Open to Marital (Array Edit) */}
+                                <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                                  <textarea
+                                    className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                                    defaultValue={a.anythingElse}
+                                    onBlur={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "anythingElse",
+                                        e.target.value.map((s) => s.trim()),
+                                      )
+                                    }
+                                  />
+                                </td>
 
-                                  {/* Actions */}
-                                  <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
-                                    <button
-                                      onClick={() =>
-                                        deleteAttendee(a.id, a.name)
-                                      }
-                                      className="p-2 text-slate-300 hover:text-red-500 transition-all"
-                                    >
-                                      <UserMinus size={18} />
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                        </tbody>
-                      </table>
-                    </div>
-                    {attendees.length === 0 && (
-                      <div className="p-20 text-center text-slate-400 italic">
-                        No registrations yet.
-                      </div>
-                    )}
+                                {/* Actions */}
+                                <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
+                                  <button
+                                    onClick={() => deleteAttendee(a.id, a.name)}
+                                    className="p-2 text-slate-300 hover:text-red-500 transition-all"
+                                  >
+                                    <UserMinus size={18} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
                   </div>
+                  {attendees.length === 0 && (
+                    <div className="p-20 text-center text-slate-400 italic">
+                      No registrations yet.
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-slate-300">
-                  <Calendar
-                    size={80}
-                    strokeWidth={1}
-                    className="mb-4 opacity-20"
-                  />
+              </div>
+            ) : (
+              /* EMPTY STATE: Show this when no event is selected and NOT on master tab */
+              <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                <div className="bg-white p-8 rounded-2xl border-2 border-dashed border-slate-200 text-center">
                   <p className="text-lg font-medium">
-                    Select an event to manage
+                    Select an event from the sidebar
+                  </p>
+                  <p className="text-sm">
+                    Or click "Master Singles List" to see everyone.
                   </p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

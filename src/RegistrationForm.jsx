@@ -108,7 +108,7 @@ const handleSubmit = async (e) => {
       await updateDoc(doc(db, "users", internalUserId), {
         ...userProfile,
         age: userAge,
-        lastUpdated: new Date()
+        createdAt: new Date()
       });
     } else {
       // New User: Create permanent profile
@@ -140,7 +140,7 @@ const handleSubmit = async (e) => {
       eventId: eventId,
       checkedIn: false,
       tableNumber: null,
-      status: "waitlist", // e.g., invited, confirmed, declined, waitlist, no response
+      status: "pending invite", // other e.g., invited, confirmed, declined, waitlist, no response ()
       groupId: "Group 1", // Default group assignment
       timestamp: new Date(),
       // We store a few redundant fields for quick filtering in Admin without extra joins
