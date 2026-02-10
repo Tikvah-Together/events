@@ -4,6 +4,8 @@ import {
   collection,
   addDoc,
   documentId,
+  serverTimestamp,
+  setDoc,
   getDoc,
   getDocs,
   doc,
@@ -36,25 +38,32 @@ export default function AdminDashboard() {
   const [masterUsers, setMasterUsers] = useState([]); // The full singles database
   const [selectedUserIds, setSelectedUserIds] = useState([]); // For checkboxes
   const [targetEventId, setTargetEventId] = useState(""); // For "Add to Event" dropdown
-  const [masterFilter, setMasterFilter] = useState("all"); // everyone, in-event, not-in-event
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
-  const [filters, setFilters] = useState({
+  const INITIAL_FILTERS = {
+    search: "",
     hashgafa: "all",
     minAgeMan: "",
     maxAgeMan: "",
     minAgeWoman: "",
     maxAgeWoman: "",
-    gender: "all", // Advanced
-    ethnicity: "all", // Advanced
-    maritalStatus: "all", // Advanced
-    isKohen: "all", // Advanced
-    shomerShabbat: "all", // Advanced
-    shomerKashrut: "all", // Advanced
-    dressStyle: "all", // Advanced
-    startDate: "", // Master List
-    endDate: "", // Master List
-  });
+    gender: "all",
+    ethnicity: "all",
+    maritalStatus: "all",
+    isKohen: "all",
+    shomerShabbat: "all",
+    shomerKashrut: "all",
+    dressStyle: "all",
+    startDate: "",
+    endDate: "",
+  };
+  const [filters, setFilters] = useState(INITIAL_FILTERS);
+
+  const resetFilters = () => {
+    setFilters(INITIAL_FILTERS);
+    setIsAdvancedOpen(false); // Closes the advanced panel if it's open
+    setSelectedUserIds([]); // Clears any bulk selections
+  };
 
   const getHashgafaGroup = (user) => {
     const { gender, hairCovering, wantsCoveredHead, dressStyle } = user;
@@ -94,6 +103,52 @@ export default function AdminDashboard() {
       border: "border-green-200",
     };
   };
+
+  const filteredMasterList = masterUsers.filter((a) => {
+    const hashgafa = getHashgafaGroup(a);
+
+    // 1. Hashgafa (Main)
+    if (filters.hashgafa !== "all" && hashgafa.label !== filters.hashgafa)
+      return false;
+
+    // 2. Gender-specific Ages (Main)
+    if (a.gender === "man") {
+      if (filters.minAgeMan && a.age < parseInt(filters.minAgeMan))
+        return false;
+      if (filters.maxAgeMan && a.age > parseInt(filters.maxAgeMan))
+        return false;
+    } else if (a.gender === "woman") {
+      if (filters.minAgeWoman && a.age < parseInt(filters.minAgeWoman))
+        return false;
+      if (filters.maxAgeWoman && a.age > parseInt(filters.maxAgeWoman))
+        return false;
+    }
+
+    // 3. Advanced Filters
+    if (filters.gender !== "all" && a.gender !== filters.gender) return false;
+    if (filters.ethnicity !== "all" && a.ethnicity !== filters.ethnicity)
+      return false;
+    if (
+      filters.maritalStatus !== "all" &&
+      a.maritalStatus !== filters.maritalStatus
+    )
+      return false;
+    if (filters.dressStyle !== "all" && a.dressStyle !== filters.dressStyle)
+      return false;
+
+    // Boolean logic for Shomer Shabbat/Kashrut/Kohen
+    const checkBool = (filterVal, userVal) => {
+      if (filterVal === "all") return true;
+      const isTrue = userVal === "yes" || userVal === true;
+      return filterVal === "yes" ? isTrue : !isTrue;
+    };
+
+    if (!checkBool(filters.isKohen, a.isKohen)) return false;
+    if (!checkBool(filters.shomerShabbat, a.isShomerShabbat)) return false;
+    if (!checkBool(filters.shomerKashrut, a.isShomerKashrut)) return false;
+
+    return true;
+  });
 
   const filteredAttendees = attendees.filter((a) => {
     const hashgafa = getHashgafaGroup(a);
@@ -324,65 +379,44 @@ export default function AdminDashboard() {
     alert("Link copied to clipboard!");
   };
 
-  const addUsersToEvent = async () => {
-    if (!targetEventId) return alert("Select an event first");
+const addUsersToEvent = async () => {
+if (!targetEventId || selectedUserIds.length === 0) return;
 
-    const confirmBatch = window.confirm(
-      `Add ${selectedUserIds.length} users to this event?`,
-    );
-    if (!confirmBatch) return;
+  // 1. FILTER: Remove anyone who is already in 'allRegistrations' for this event
+  const trulyNewIds = selectedUserIds.filter(userId => 
+    !allRegistrations.some(reg => reg.userId === userId && reg.eventId === targetEventId)
+  );
 
-    try {
-      for (const userId of selectedUserIds) {
-        const user = masterUsers.find((u) => u.id === userId);
-        // Logic to add to your 'attendees' subcollection or collection
-        await addDoc(collection(db, "events", targetEventId, "attendees"), {
-          ...user,
-          addedAt: serverTimestamp(),
-          status: "confirmed", // or "pending"
-        });
-      }
-      alert("Users added successfully!");
-      setSelectedUserIds([]);
-    } catch (error) {
-      console.error("Error adding users:", error);
-    }
-  };
+  if (trulyNewIds.length === 0) {
+    alert("All selected users are already in this event.");
+    setSelectedUserIds([]);
+    return;
+  }
 
-  const addSelectedToEvent = async () => {
-    if (!targetEventId || selectedUserIds.length === 0) return;
+  const targetEvent = events.find((e) => e.id === targetEventId);
+  setLoading(true);
 
-    const targetEvent = events.find((e) => e.id === targetEventId);
-    setLoading(true);
-
-    try {
-      const promises = selectedUserIds.map(async (userId) => {
-        // Final Database Safety Check:
-        const exists = allRegistrations.find(
-          (r) => r.userId === userId && r.eventId === targetEventId,
-        );
-        if (exists) return;
-
-        return addDoc(collection(db, "registrations"), {
-          userId,
-          eventId: targetEventId,
-          eventName: targetEvent?.name || "Unknown Event",
-          groupId: "Group 1",
-          confirmationStatus: "Invited",
-          checkedIn: false,
-          createdAt: new Date(),
-        });
+  try {
+    const promises = trulyNewIds.map(async (userId) => {
+      return addDoc(collection(db, "registrations"), {
+        userId,
+        eventId: targetEventId,
+        eventName: targetEvent?.name || "Unknown Event",
+        groupId: "Group 1", // Default group
+        confirmationStatus: "pending invite",
+        checkedIn: false,
       });
+    });
 
-      await Promise.all(promises);
-      setSelectedUserIds([]);
-      alert(`Successfully added to ${targetEvent?.name}`);
-    } catch (err) {
-      console.error(err);
-      alert("Error adding users.");
-    }
-    setLoading(false);
-  };
+    await Promise.all(promises);
+    setSelectedUserIds([]);
+    alert(`Added ${trulyNewIds.length} users to ${targetEvent?.name}`);
+  } catch (err) {
+    console.error(err);
+    alert("Error adding users.");
+  }
+  setLoading(false);
+};
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "registrations"), (snap) => {
@@ -402,12 +436,13 @@ export default function AdminDashboard() {
 
   // Helper to get a user's event history
   const getUserHistory = (userId) => {
-    // You'll need a global registrations state or fetch this once
-    // For now, we can filter against the 'events' we already have in state
-    // and check if a registration exists for them (logic simplified for brevity)
-    return events.filter((ev) =>
-      attendees.some((a) => a.userId === userId && a.eventId === ev.id),
-    );
+    const userRegs = allRegistrations.filter((r) => r.userId === userId);
+    const eventNames = userRegs.map((r) => {
+        const event = events.find((e) => e.id === r.eventId);
+        return event ? event.name : null;
+      })
+      .filter(Boolean);
+    return eventNames;
   };
 
   // 1. Fetch all events in real-time
@@ -480,30 +515,30 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const cleanupOldEvents = async () => {
-      const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000);
+      // const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000);
 
-      // We only want to delete events that have a scheduledAt date
-      const q = query(
-        collection(db, "events"),
-        where("scheduledAt", "<", seventyTwoHoursAgo),
-      );
-      const snapshot = await getDocs(q);
+      // // We only want to delete events that have a scheduledAt date
+      // const q = query(
+      //   collection(db, "events"),
+      //   where("scheduledAt", "<", seventyTwoHoursAgo),
+      // );
+      // const snapshot = await getDocs(q);
 
-      snapshot.forEach(async (eventDoc) => {
-        // Delete registrations first (optional but recommended for data hygiene)
-        const regQ = query(
-          collection(db, "registrations"),
-          where("eventId", "==", eventDoc.id),
-        );
-        const regSnap = await getDocs(regQ);
-        regSnap.forEach(
-          async (r) => await deleteDoc(doc(db, "registrations", r.id)),
-        );
+      // snapshot.forEach(async (eventDoc) => {
+      //   // Delete registrations first (optional but recommended for data hygiene)
+      //   const regQ = query(
+      //     collection(db, "registrations"),
+      //     where("eventId", "==", eventDoc.id),
+      //   );
+      //   const regSnap = await getDocs(regQ);
+      //   regSnap.forEach(
+      //     async (r) => await deleteDoc(doc(db, "registrations", r.id)),
+      //   );
 
-        // Delete the event itself
-        await deleteDoc(doc(db, "events", eventDoc.id));
-        console.log(`Auto-deleted expired event: ${eventDoc.id}`);
-      });
+      //   // Delete the event itself
+      //   await deleteDoc(doc(db, "events", eventDoc.id));
+      //   console.log(`Auto-deleted expired event: ${eventDoc.id}`);
+      // });
     };
 
     if (events.length > 0) {
@@ -972,6 +1007,7 @@ export default function AdminDashboard() {
                             setFilters({
                               ...filters,
                               minAgeMan: e.target.value,
+                              gender: "man", // Auto-set gender
                             })
                           }
                         />
@@ -984,6 +1020,7 @@ export default function AdminDashboard() {
                             setFilters({
                               ...filters,
                               maxAgeMan: e.target.value,
+                              gender: "man", // Auto-set gender
                             })
                           }
                         />
@@ -991,22 +1028,35 @@ export default function AdminDashboard() {
                     </div>
 
                     <div>
-                      <div className="flex justify-between items-center mb-2">
+                      <div className="flex justify-between items-end mb-2">
+                        {/* 1. The Label stays on the left */}
                         <label className="text-[10px] font-bold text-pink-600 uppercase block">
                           Women's Age Range
                         </label>
-                        <button
-                          onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
-                          className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
-                        >
-                          {isAdvancedOpen
-                            ? "Close Advanced"
-                            : "Advanced Filters"}
-                          <ChevronDown
-                            size={14}
-                            className={`transition-transform ${isAdvancedOpen ? "rotate-180" : ""}`}
-                          />
-                        </button>
+
+                        {/* 2. Group the buttons together so they move as one unit to the right */}
+                        <div className="flex items-center gap-4">
+                          <button
+                            onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+                            className="text-xs text-blue-600 font-bold flex items-center gap-1 hover:underline"
+                          >
+                            {isAdvancedOpen
+                              ? "Hide Filters"
+                              : "Advanced Filters"}
+                            <ChevronDown
+                              size={14}
+                              className={`transition-transform ${isAdvancedOpen ? "rotate-180" : ""}`}
+                            />
+                          </button>
+
+                          <button
+                            onClick={resetFilters}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                            Clear All Filters
+                          </button>
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <input
@@ -1018,6 +1068,7 @@ export default function AdminDashboard() {
                             setFilters({
                               ...filters,
                               minAgeWoman: e.target.value,
+                              gender: "woman", // Auto-set gender
                             })
                           }
                         />
@@ -1030,6 +1081,7 @@ export default function AdminDashboard() {
                             setFilters({
                               ...filters,
                               maxAgeWoman: e.target.value,
+                              gender: "woman", // Auto-set gender
                             })
                           }
                         />
@@ -1182,7 +1234,7 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   )}
-                  {selectedUserIds.length > 0 && activeTab === "master" && (
+                  {activeTab === "master" && (
                     <div className="bg-blue-500 text-white p-4 rounded flex items-center justify-between">
                       <span className="font-bold">
                         {selectedUserIds.length} user(s) selected
@@ -1219,19 +1271,20 @@ export default function AdminDashboard() {
                         <tr>
                           {activeTab === "master" && (
                             <th className="px-6 py-4">
+                              Unselect all&nbsp;
                               <input
                                 type="checkbox"
+                                disabled={filteredMasterList.length === 0 || !targetEventId} // Disable if no users visible or no event selected
                                 checked={
-                                  masterUsers.length > 0 &&
-                                  masterUsers.every((user) =>
+                                  filteredMasterList.length > 0 &&
+                                  filteredMasterList.every((user) =>
                                     selectedUserIds.includes(user.id),
                                   )
                                 }
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    const allVisibleIds = masterUsers.map(
-                                      (u) => u.id,
-                                    );
+                                    const allVisibleIds =
+                                      filteredMasterList.map((u) => u.id);
                                     setSelectedUserIds([
                                       ...new Set([
                                         ...selectedUserIds,
@@ -1239,7 +1292,7 @@ export default function AdminDashboard() {
                                       ]),
                                     ]);
                                   } else {
-                                    const visibleIds = masterUsers.map(
+                                    const visibleIds = filteredMasterList.map(
                                       (u) => u.id,
                                     );
                                     setSelectedUserIds((prev) =>
@@ -1258,6 +1311,9 @@ export default function AdminDashboard() {
                           <th className="px-6 py-4">Hashgafa</th>
                           {activeTab === "master" && (
                             <th className="px-6 py-4">Signup Date</th>
+                          )}
+                          {activeTab === "master" && (
+                            <th className="px-6 py-4">Event History</th>
                           )}
                           {activeTab === "events" && (
                             <th className="px-6 py-4">Confirmation Status</th>
@@ -1296,7 +1352,7 @@ export default function AdminDashboard() {
                           // Determine which list we are actually using
                           const listToDisplay = (
                             activeTab === "master"
-                              ? masterUsers
+                              ? filteredMasterList
                               : filteredAttendees
                           ).filter((user) => {
                             if (!filters.startDate && !filters.endDate)
@@ -1337,6 +1393,9 @@ export default function AdminDashboard() {
 
                           return sortedList.map((a, index) => {
                             const hashgafa = getHashgafaGroup(a);
+                            const isAlreadyInEvent = allRegistrations.some(
+    (reg) => reg.userId === a.id && reg.eventId === targetEventId
+  );
 
                             // Fix the "New Group" logic to reference the correct array
                             let isNewGroup = false;
@@ -1349,13 +1408,18 @@ export default function AdminDashboard() {
                             return (
                               <tr
                                 key={a.id}
-                                className={`hover:bg-slate-50 transition-colors ${isNewGroup ? "border-t-4 border-slate-300" : ""}`}
+                                className={`border-b transition-colors ${
+        isAlreadyInEvent ? "bg-slate-50 opacity-60" : "hover:bg-slate-50"
+      }`}
                               >
                                 {activeTab === "master" && (
                                   <td className="px-6 py-4">
+                                    <div className="flex flex-col gap-1">
                                     <input
                                       type="checkbox"
                                       checked={selectedUserIds.includes(a.id)}
+                                      disabled={isAlreadyInEvent || !targetEventId} // Disable if already in OR no event selected
+                                      className={`${isAlreadyInEvent ? "cursor-not-allowed" : "cursor-pointer"}`}
                                       onChange={() => {
                                         setSelectedUserIds((prev) =>
                                           prev.includes(a.id)
@@ -1364,8 +1428,15 @@ export default function AdminDashboard() {
                                         );
                                       }}
                                     />
+                                    {isAlreadyInEvent && (
+            <span className="text-[9px] font-bold text-slate-400 uppercase leading-tight">
+              Added
+            </span>
+          )}
+        </div>
                                   </td>
                                 )}
+
                                 {/* Permanent Name Column */}
                                 <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
                                   <p className="font-bold text-slate-900">
@@ -1390,6 +1461,13 @@ export default function AdminDashboard() {
                                   <td className="px-6 py-4 text-slate-500">
                                     {a.createdAt?.toDate().toLocaleString() ||
                                       "-"}
+                                  </td>
+                                )}
+
+                                {/* Event History */}
+                                {activeTab === "master" && (
+                                  <td className="px-6 py-4 text-slate-500 text-xs italic">
+                                    {getUserHistory(a.id).join(", ") || "-"}
                                   </td>
                                 )}
 
