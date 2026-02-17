@@ -371,6 +371,16 @@ export default function AdminDashboard() {
     }
   };
 
+  const deleteUserFromMaster = async (userId, name) => {
+    if (window.confirm(`Permanently delete ${name} from the Master List? This cannot be undone.`)) {
+      try {      
+        await deleteDoc(doc(db, "users", userId));      
+      } catch (err) {
+        console.error("Error deleting user:", err);      
+      }
+    }
+  };
+
   const copyRegistrationLink = (eventId) => {
     // window.location.origin will use http://localhost:3000 or your production URL automatically
     const registrationUrl = `${window.location.origin}/register?eventId=${eventId}`;
@@ -379,44 +389,79 @@ export default function AdminDashboard() {
     alert("Link copied to clipboard!");
   };
 
-const addUsersToEvent = async () => {
-if (!targetEventId || selectedUserIds.length === 0) return;
+  const addUsersToEvent = async () => {
+    if (!targetEventId || selectedUserIds.length === 0) return;
 
-  // 1. FILTER: Remove anyone who is already in 'allRegistrations' for this event
-  const trulyNewIds = selectedUserIds.filter(userId => 
-    !allRegistrations.some(reg => reg.userId === userId && reg.eventId === targetEventId)
-  );
+    // 1. FILTER: Remove anyone who is already in 'allRegistrations' for this event
+    const trulyNewIds = selectedUserIds.filter(
+      (userId) =>
+        !allRegistrations.some(
+          (reg) => reg.userId === userId && reg.eventId === targetEventId,
+        ),
+    );
 
-  if (trulyNewIds.length === 0) {
-    alert("All selected users are already in this event.");
-    setSelectedUserIds([]);
-    return;
-  }
+    if (trulyNewIds.length === 0) {
+      alert("All selected users are already in this event.");
+      setSelectedUserIds([]);
+      return;
+    }
 
-  const targetEvent = events.find((e) => e.id === targetEventId);
-  setLoading(true);
+    const targetEvent = events.find((e) => e.id === targetEventId);
+    setLoading(true);
 
-  try {
-    const promises = trulyNewIds.map(async (userId) => {
-      return addDoc(collection(db, "registrations"), {
-        userId,
-        eventId: targetEventId,
-        eventName: targetEvent?.name || "Unknown Event",
-        groupId: "Group 1", // Default group
-        confirmationStatus: "pending invite",
-        checkedIn: false,
+    try {
+      const promises = trulyNewIds.map(async (userId) => {
+        return addDoc(collection(db, "registrations"), {
+          userId,
+          eventId: targetEventId,
+          eventName: targetEvent?.name || "Unknown Event",
+          groupId: "Group 1", // Default group
+          confirmationStatus: "pending invite",
+          checkedIn: false,
+        });
       });
-    });
 
-    await Promise.all(promises);
-    setSelectedUserIds([]);
-    alert(`Added ${trulyNewIds.length} users to ${targetEvent?.name}`);
-  } catch (err) {
-    console.error(err);
-    alert("Error adding users.");
-  }
-  setLoading(false);
-};
+      await Promise.all(promises);
+      setSelectedUserIds([]);
+      alert(`Added ${trulyNewIds.length} users to ${targetEvent?.name}`);
+    } catch (err) {
+      console.error(err);
+      alert("Error adding users.");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    const hasMaleAge = filters.minAgeMan || filters.maxAgeMan;
+    const hasFemaleAge = filters.minAgeWoman || filters.maxAgeWoman;
+
+    setFilters((prev) => {
+      // Rule 1: Both ranges have values -> Default to "all"
+      if (hasMaleAge && hasFemaleAge) {
+        if (prev.gender === "all") return prev; // Avoid unnecessary re-renders
+        return { ...prev, gender: "all" };
+      }
+
+      // Rule 2: Only Male range has values -> Default to "man"
+      if (hasMaleAge && !hasFemaleAge) {
+        if (prev.gender === "man") return prev;
+        return { ...prev, gender: "man" };
+      }
+
+      // Rule 3: Only Female range has values -> Default to "woman"
+      if (hasMaleAge && !hasFemaleAge) {
+        if (prev.gender === "woman") return prev;
+        return { ...prev, gender: "woman" };
+      }
+
+      return prev;
+    });
+  }, [
+    filters.minAgeMan,
+    filters.maxAgeMan,
+    filters.minAgeWoman,
+    filters.maxAgeWoman,
+  ]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "registrations"), (snap) => {
@@ -437,7 +482,8 @@ if (!targetEventId || selectedUserIds.length === 0) return;
   // Helper to get a user's event history
   const getUserHistory = (userId) => {
     const userRegs = allRegistrations.filter((r) => r.userId === userId);
-    const eventNames = userRegs.map((r) => {
+    const eventNames = userRegs
+      .map((r) => {
         const event = events.find((e) => e.id === r.eventId);
         return event ? event.name : null;
       })
@@ -516,14 +562,12 @@ if (!targetEventId || selectedUserIds.length === 0) return;
   useEffect(() => {
     const cleanupOldEvents = async () => {
       // const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000);
-
       // // We only want to delete events that have a scheduledAt date
       // const q = query(
       //   collection(db, "events"),
       //   where("scheduledAt", "<", seventyTwoHoursAgo),
       // );
       // const snapshot = await getDocs(q);
-
       // snapshot.forEach(async (eventDoc) => {
       //   // Delete registrations first (optional but recommended for data hygiene)
       //   const regQ = query(
@@ -534,7 +578,6 @@ if (!targetEventId || selectedUserIds.length === 0) return;
       //   regSnap.forEach(
       //     async (r) => await deleteDoc(doc(db, "registrations", r.id)),
       //   );
-
       //   // Delete the event itself
       //   await deleteDoc(doc(db, "events", eventDoc.id));
       //   console.log(`Auto-deleted expired event: ${eventDoc.id}`);
@@ -1243,7 +1286,10 @@ if (!targetEventId || selectedUserIds.length === 0) return;
                         <select
                           className="text-black text-sm p-1.5 rounded border border-slate-300"
                           value={targetEventId}
-                          onChange={(e) => setTargetEventId(e.target.value)}
+                          onChange={(e) => {
+                            setTargetEventId(e.target.value);
+                            setSelectedUserIds([]);
+                          }}
                         >
                           <option value="">Select Target Event...</option>
                           {events.map((ev) => (
@@ -1271,33 +1317,49 @@ if (!targetEventId || selectedUserIds.length === 0) return;
                         <tr>
                           {activeTab === "master" && (
                             <th className="px-6 py-4">
-                              Unselect all&nbsp;
+                              Select all&nbsp;
                               <input
                                 type="checkbox"
-                                disabled={filteredMasterList.length === 0 || !targetEventId} // Disable if no users visible or no event selected
+                                disabled={
+                                  filteredMasterList.length === 0 ||
+                                  !targetEventId
+                                } // Disable if no users visible or no event selected
                                 checked={
                                   filteredMasterList.length > 0 &&
-                                  filteredMasterList.every((user) =>
-                                    selectedUserIds.includes(user.id),
-                                  )
+                                  filteredMasterList
+                                    .filter(
+                                      (u) =>
+                                        !allRegistrations.some(
+                                          (r) =>
+                                            r.userId === u.id &&
+                                            r.eventId === targetEventId,
+                                        ),
+                                    )
+                                    .every((u) =>
+                                      selectedUserIds.includes(u.id),
+                                    )
                                 }
                                 onChange={(e) => {
+                                  // Only select people who ARE NOT already in the event
+                                  const eligibleIds = filteredMasterList
+                                    .filter(
+                                      (u) =>
+                                        !allRegistrations.some(
+                                          (r) =>
+                                            r.userId === u.id &&
+                                            r.eventId === targetEventId,
+                                        ),
+                                    )
+                                    .map((u) => u.id);
+
                                   if (e.target.checked) {
-                                    const allVisibleIds =
-                                      filteredMasterList.map((u) => u.id);
-                                    setSelectedUserIds([
-                                      ...new Set([
-                                        ...selectedUserIds,
-                                        ...allVisibleIds,
-                                      ]),
+                                    setSelectedUserIds((prev) => [
+                                      ...new Set([...prev, ...eligibleIds]),
                                     ]);
                                   } else {
-                                    const visibleIds = filteredMasterList.map(
-                                      (u) => u.id,
-                                    );
                                     setSelectedUserIds((prev) =>
                                       prev.filter(
-                                        (id) => !visibleIds.includes(id),
+                                        (id) => !eligibleIds.includes(id),
                                       ),
                                     );
                                   }
@@ -1311,6 +1373,9 @@ if (!targetEventId || selectedUserIds.length === 0) return;
                           <th className="px-6 py-4">Hashgafa</th>
                           {activeTab === "master" && (
                             <th className="px-6 py-4">Signup Date</th>
+                          )}
+                          {activeTab === "master" && (
+                            <th className="px-6 py-4">Internal User ID</th>
                           )}
                           {activeTab === "master" && (
                             <th className="px-6 py-4">Event History</th>
@@ -1394,8 +1459,10 @@ if (!targetEventId || selectedUserIds.length === 0) return;
                           return sortedList.map((a, index) => {
                             const hashgafa = getHashgafaGroup(a);
                             const isAlreadyInEvent = allRegistrations.some(
-    (reg) => reg.userId === a.id && reg.eventId === targetEventId
-  );
+                              (reg) =>
+                                reg.userId === a.id &&
+                                reg.eventId === targetEventId,
+                            );
 
                             // Fix the "New Group" logic to reference the correct array
                             let isNewGroup = false;
@@ -1409,36 +1476,40 @@ if (!targetEventId || selectedUserIds.length === 0) return;
                               <tr
                                 key={a.id}
                                 className={`border-b transition-colors ${
-        isAlreadyInEvent ? "bg-slate-50 opacity-60" : "hover:bg-slate-50"
-      }`}
+                                  isAlreadyInEvent
+                                    ? "bg-slate-200/70"
+                                    : "hover:bg-blue-50"
+                                }`}
                               >
                                 {activeTab === "master" && (
                                   <td className="px-6 py-4">
                                     <div className="flex flex-col gap-1">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedUserIds.includes(a.id)}
-                                      disabled={isAlreadyInEvent || !targetEventId} // Disable if already in OR no event selected
-                                      className={`${isAlreadyInEvent ? "cursor-not-allowed" : "cursor-pointer"}`}
-                                      onChange={() => {
-                                        setSelectedUserIds((prev) =>
-                                          prev.includes(a.id)
-                                            ? prev.filter((id) => id !== a.id)
-                                            : [...prev, a.id],
-                                        );
-                                      }}
-                                    />
-                                    {isAlreadyInEvent && (
-            <span className="text-[9px] font-bold text-slate-400 uppercase leading-tight">
-              Added
-            </span>
-          )}
-        </div>
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedUserIds.includes(a.id)}
+                                        disabled={
+                                          isAlreadyInEvent || !targetEventId
+                                        } // Disable if already in OR no event selected
+                                        className={`${isAlreadyInEvent ? "cursor-not-allowed" : "cursor-pointer"}`}
+                                        onChange={() => {
+                                          setSelectedUserIds((prev) =>
+                                            prev.includes(a.id)
+                                              ? prev.filter((id) => id !== a.id)
+                                              : [...prev, a.id],
+                                          );
+                                        }}
+                                      />
+                                      {isAlreadyInEvent && (
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase leading-tight">
+                                          Added
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                 )}
 
                                 {/* Permanent Name Column */}
-                                <td className="px-6 py-4 sticky left-0 bg-white z-10 border-r border-slate-100">
+                                <td className={`px-6 py-4 sticky left-0 z-10 border-r border-slate-100 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-blue-50"}`}>
                                   <p className="font-bold text-slate-900">
                                     {a.firstName} {a.lastName}
                                   </p>
@@ -1461,6 +1532,13 @@ if (!targetEventId || selectedUserIds.length === 0) return;
                                   <td className="px-6 py-4 text-slate-500">
                                     {a.createdAt?.toDate().toLocaleString() ||
                                       "-"}
+                                  </td>
+                                )}
+
+                                {/* Internal User ID */}
+                                {activeTab === "master" && (
+                                  <td className="px-6 py-4 text-slate-500">
+                                    {a.id || "Error: No ID"}
                                   </td>
                                 )}
 
@@ -1790,9 +1868,9 @@ if (!targetEventId || selectedUserIds.length === 0) return;
                                 </td>
 
                                 {/* Actions */}
-                                <td className="px-6 py-4 text-right sticky right-0 bg-white group-hover:bg-slate-50">
+                                <td className={`px-6 py-4 text-right sticky right-0 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-blue-50"}`}>
                                   <button
-                                    onClick={() => deleteAttendee(a.id, a.name)}
+                                    onClick={() => activeTab === "master" ? deleteUserFromMaster(a.id, a.name) : deleteAttendee(a.id, a.firstName + " " + a.lastName)}
                                     className="p-2 text-slate-300 hover:text-red-500 transition-all"
                                   >
                                     <UserMinus size={18} />
