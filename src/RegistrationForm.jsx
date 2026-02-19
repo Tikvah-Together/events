@@ -120,6 +120,11 @@ const handleSubmit = async (e) => {
       internalUserId = newUserRef.id;
     }
 
+    if (!eventId) {
+      setLoading(false);
+      return;
+    }
+
     // 3. Check if they are already registered for THIS specific event
     const regCheckQuery = query(
       collection(db, "registrations"), 
@@ -165,32 +170,32 @@ const handleSubmit = async (e) => {
           Event Registration
         </h2>
 
-        {/* Conditional UI: Show name if ID is in URL, otherwise show dropdown */}
+        {/* Conditional UI: Show name if ID is in URL, otherwise show nothing */}
         {urlEventId ? (
           <p className="text-center text-blue-600 font-medium mb-8">
             Registering for: {selectedEventName || "Loading event..."}
           </p>
         ) : (
-          <div className="mb-8">
-            <label className="block font-semibold mb-2 text-center text-slate-600">
-              Select Event
-            </label>
-            <select
-              required
-              className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              value={formData.eventId}
-              onChange={(e) =>
-                setFormData({ ...formData, eventId: e.target.value })
-              }
-            >
-              <option value="">-- Choose an Event --</option>
-              {events.map((ev) => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          <></>
+          // <div className="mb-8">
+          //   <label className="block font-semibold mb-2 text-center text-slate-600">
+          //     Select Event
+          //   </label>
+          //   <select
+          //     className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          //     value={formData.eventId}
+          //     onChange={(e) =>
+          //       setFormData({ ...formData, eventId: e.target.value })
+          //     }
+          //   >
+          //     <option value="">-- Choose an Event --</option>
+          //     {events.map((ev) => (
+          //       <option key={ev.id} value={ev.id}>
+          //         {ev.name}
+          //       </option>
+          //     ))}
+          //   </select>
+          // </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">

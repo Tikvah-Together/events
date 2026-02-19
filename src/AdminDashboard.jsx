@@ -34,6 +34,7 @@ export default function AdminDashboard() {
   const [roundTime, setRoundTime] = useState(7);
   const [loading, setLoading] = useState(false);
   const [allRegistrations, setAllRegistrations] = useState([]); // All registrations for history/duplicate checks
+  const [registrations, setRegistrations] = useState([]);
   const [activeTab, setActiveTab] = useState("events"); // "events" or "master"
   const [masterUsers, setMasterUsers] = useState([]); // The full singles database
   const [selectedUserIds, setSelectedUserIds] = useState([]); // For checkboxes
@@ -232,7 +233,7 @@ export default function AdminDashboard() {
     );
     const attSnap = await getDocs(attQuery);
     const resetPromises = attSnap.docs.map((doc) =>
-      updateDoc(doc.ref, { checkedIn: false, tableNumber: null }),
+      updateDoc(doc.ref, { checkedIn: false, eventLabel: null, tableNumber: null }),
     );
     await Promise.all(resetPromises);
   };
@@ -247,17 +248,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    // 1. Auto-Assign Tables
-    const womenUpdates = women.map((w, i) =>
-      updateDoc(doc(db, "registrations", w.id), { tableNumber: i + 1 }),
-    );
-    const menUpdates = men.map((m, i) =>
-      updateDoc(doc(db, "registrations", m.id), { tableNumber: i + 1 }),
-    );
-
-    await Promise.all([...womenUpdates, ...menUpdates]);
-
-    // 2. Launch with a Start Timestamp
+    // Launch with a Start Timestamp
     const eventRef = doc(db, "events", selectedEvent.id);
     await updateDoc(eventRef, {
       active: true,
@@ -277,7 +268,7 @@ export default function AdminDashboard() {
       const registration = regSnap.data();
 
       if (!newStatus) {
-        await updateDoc(regRef, { checkedIn: false, tableNumber: null });
+        await updateDoc(regRef, { checkedIn: false, eventLabel: null, tableNumber: null });
         return;
       }
 
@@ -320,11 +311,11 @@ export default function AdminDashboard() {
           (a) =>
             a.checkedIn &&
             String(a.groupId) === participantGroupName &&
-            a.tableNumber?.startsWith(prefix),
+            a.eventLabel?.startsWith(prefix),
         )
         .map((a) => {
           // Extract number from "B1-A" -> "1"
-          const beforeHyphen = a.tableNumber.split("-")[0]; // "B1"
+          const beforeHyphen = a.eventLabel.split("-")[0]; // "B1"
           const numOnly = beforeHyphen.substring(1); // "1"
           return parseInt(numOnly);
         })
@@ -341,7 +332,8 @@ export default function AdminDashboard() {
       // 7. Update Database
       await updateDoc(regRef, {
         checkedIn: true,
-        tableNumber: `${prefix}${assignedNumber}-${groupSuffix}`,
+        eventLabel: `${prefix}${assignedNumber}-${groupSuffix}`,
+        tableNumber: `Table ${assignedNumber} - ${participantGroupName || "U"}`,
       });
     } catch (err) {
       console.error("Check-in error:", err);
@@ -625,6 +617,7 @@ export default function AdminDashboard() {
         "checkedIn",
         "groupId",
         "tableNumber",
+        "eventLabel",
         "isConfirmed",
       ];
       const isRegistrationField = registrationFields.includes(field);
@@ -1375,9 +1368,6 @@ export default function AdminDashboard() {
                             <th className="px-6 py-4">Signup Date</th>
                           )}
                           {activeTab === "master" && (
-                            <th className="px-6 py-4">Internal User ID</th>
-                          )}
-                          {activeTab === "master" && (
                             <th className="px-6 py-4">Event History</th>
                           )}
                           {activeTab === "events" && (
@@ -1390,6 +1380,9 @@ export default function AdminDashboard() {
                             <th className="px-6 py-4">Group Assignment</th>
                           )}
                           <th className="px-6 py-4">Gender</th>
+                          {activeTab === "events" && (
+                            <th className="px-6 py-4">Event Label</th>
+                          )}
                           {activeTab === "events" && (
                             <th className="px-6 py-4">Table Number</th>
                           )}
@@ -1535,13 +1528,6 @@ export default function AdminDashboard() {
                                   </td>
                                 )}
 
-                                {/* Internal User ID */}
-                                {activeTab === "master" && (
-                                  <td className="px-6 py-4 text-slate-500">
-                                    {a.id || "Error: No ID"}
-                                  </td>
-                                )}
-
                                 {/* Event History */}
                                 {activeTab === "master" && (
                                   <td className="px-6 py-4 text-slate-500 text-xs italic">
@@ -1663,11 +1649,37 @@ export default function AdminDashboard() {
                                   </select>
                                 </td>
 
+                                {/* Event Label */}
+                                {activeTab === "events" && (
+                                  <td className="px-6 py-4 text-[11px]">
+                                  <textarea
+                                    className="bg-transparent border border-slate-100 rounded p-1 w-auto h-auto leading-tight outline-none focus:bg-white"
+                                    value={a.eventLabel || ""}
+                                    onChange={(e) =>
+                                      updateAttendeeField(a,
+                                        "eventLabel",
+                                        e.target.value
+                                      )
+                                    }
+                                  />
+                                </td>
+                                )}
+
                                 {/* Table Number */}
                                 {activeTab === "events" && (
-                                  <td className="px-6 py-4 text-slate-800 font-mono">
-                                    {a.tableNumber || "-"}
-                                  </td>
+                                  <td className="px-6 py-4 text-[11px]">
+                                  <textarea
+                                    className="bg-transparent border border-slate-100 rounded p-1 w-auto h-auto leading-tight outline-none focus:bg-white"
+                                    value={a.tableNumber || ""}
+                                    onChange={(e) =>
+                                      updateAttendeeField(
+                                        a,
+                                        "tableNumber",
+                                        e.target.value,
+                                      )
+                                    }
+                                  />
+                                </td>
                                 )}
 
                                 {/* Ethnicity */}
@@ -1698,8 +1710,8 @@ export default function AdminDashboard() {
                                 <td className="px-6 py-4 text-slate-400 italic text-[11px]">
                                   <textarea
                                     className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                                    defaultValue={a.otherSpecify}
-                                    onBlur={(e) =>
+                                    value={a.otherSpecify}
+                                    onChange={(e) =>
                                       updateAttendeeField(
                                         a,
                                         "otherSpecify",

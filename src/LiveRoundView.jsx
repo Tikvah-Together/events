@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, use } from 'react';
 import { db } from './firebase';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { MapPin, PartyPopper, Maximize, Coffee } from 'lucide-react';
@@ -10,6 +10,8 @@ export default function LiveRoundView({ event, user, attendees }) {
   const [emailInput, setEmailInput] = useState("");
   const [pendingSelection, setPendingSelection] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [tableAnswer, setTableAnswer] = useState("");
+  const [optionalNotes, setOptionalNotes] = useState("");
   const containerRef = useRef(null);
 
   // --- 1. COMPATIBILITY FILTER ---
@@ -60,6 +62,11 @@ export default function LiveRoundView({ event, user, attendees }) {
     }
     setIsFullscreen(true);
   };
+
+  useEffect(() => {
+    const hasEmail = !!user.email;
+    setShowEmailModal(!hasEmail);
+  }, [user.email]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -124,10 +131,9 @@ const partner = attendees.find(a =>
   const isMatch = partner ? checkCompatibility(user, partner) : false;
 
   // --- HANDLERS ---
-const handleSelection = async (type) => {
+const handleInterestedSelection = async (type) => {
     if (type !== 'no' && !user.email && !emailInput) {
       setPendingSelection(type);
-      setShowEmailModal(true);
       return;
     }
     submitToFirebase(type);
@@ -135,7 +141,7 @@ const handleSelection = async (type) => {
 
   const submitToFirebase = async (type) => {
     try {
-      const myRef = doc(db, "registrations", user.id);
+      const myRef = doc(db, "users", user.id);
       const updateData = {};
       
       if (type === 'yes') updateData.selections = arrayUnion(partner.id);
@@ -144,10 +150,36 @@ const handleSelection = async (type) => {
 
       await updateDoc(myRef, updateData);
       setDecisionMade(true);
-      setShowEmailModal(false);
     } catch (err) {
       console.error("Save Error:", err);
     }
+  };
+
+  const saveInformationAndContinue = () => {
+    if (tableAnswer !== tableToShow) {
+      alert("Please enter the correct table number.");
+      return;
+    }
+
+    const feedbackData = {
+      interested: pendingSelection,
+      tableAnswer,
+      optionalNotes,
+    };
+
+    const myRef = doc(db, "users", user.id);
+    // save the feedback data in a new array entry under "feedbackData" in the user's document in firebase, without overwriting previous entries (use arrayUnion) make sure to save it under the parter's ID as well so we know which feedback corresponds to which partner
+    updateDoc(myRef, {
+      feedbackData: arrayUnion({
+        partnerId: partner.id,
+        ...feedbackData
+      })
+    }).then(() => {
+      setDecisionMade(true);
+      setShowEmailModal(false);
+    }).catch((err) => {
+      console.error("Error saving feedback:", err);
+    });
   };
 
     // --- FULLSCREEN PROMPT ---
@@ -171,26 +203,44 @@ if (isEventOver) {
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-10 text-center">
       {(!decisionMade && partner && isMatch) ? (
-        <div className="w-full max-w-xl animate-in fade-in zoom-in duration-500">
-          <h2 className="text-3xl font-bold mb-2 text-slate-400">Final Date! How was</h2>
-          <h1 className="text-6xl font-black mb-12">{partner.name}?</h1>
-          <div className="flex flex-col gap-4">
-            <button onClick={() => handleSelection('yes')} className="w-full py-8 bg-white text-green-600 rounded-3xl text-4xl font-black shadow-xl">Interested</button>
-            <button onClick={() => handleSelection('maybe')} className="w-full py-8 bg-white text-blue-600 rounded-3xl text-4xl font-black shadow-xl">Maybe</button>
-            <button onClick={() => handleSelection('no')} className="w-full py-6 bg-slate-800 text-slate-400 rounded-3xl text-2xl font-bold">No thanks</button>
+        <div className="w-full max-w-xl text-center">
+            <h2 className="text-3xl font-bold mb-2">What table were you just at?</h2>
+            <textarea className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg outline-none focus:bg-white"
+              placeholder={`Table ${tableToShow}`}
+              value={tableToShow}
+              onChange={(e) => setTableAnswer(e.target.value)}
+            />
+
+            <h2 className="text-3xl font-bold mb-2">How was your date with</h2>
+            <h1 className="text-6xl font-black mb-12">{partner.name}?</h1>
+            <h2 className="text-3xl font-bold mb-2">Are you interested?</h2>
+            <div className="flex flex-col gap-4">
+              <button onClick={() => handleInterestedSelection('yes')} className="w-full py-6 bg-white text-green-600 rounded-2xl text-3xl font-black shadow-xl">Interested</button>
+              <button onClick={() => handleInterestedSelection('maybe')} className="w-full py-6 bg-white text-blue-600 rounded-2xl text-3xl font-black shadow-xl">Maybe</button>
+              <button onClick={() => handleInterestedSelection('no')} className="w-full py-4 bg-orange-800 text-orange-200 rounded-2xl text-xl font-bold">No thanks</button>
+            </div>
+            {/* Ask for optional private notes*/}
+            <h2 className="text-3xl font-bold mt-12 mb-2">Optional: Private Notes for Organizer</h2>
+            <textarea 
+              className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg outline-none focus:bg-white"
+              placeholder={`E.g. "Great conversation about travel, but prefer not to match."`}
+              onChange={(e) => setOptionalNotes(e.target.value)}
+            />
+            {/* Submit Button that gathers the information and saves it in the user db on firebase as a new entry under user ID */}
+            <button 
+              onClick={() => saveInformationAndContinue()}
+              className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold"
+            >
+              Submit Feedback
+            </button>
           </div>
-        </div>
       ) : (
         <div className="animate-in slide-in-from-bottom duration-700">
           <PartyPopper size={100} className="mb-8 text-yellow-400 mx-auto" />
           <h1 className="text-7xl font-black mb-4 tracking-tighter">ALL DONE!</h1>
           <p className="text-2xl text-slate-400 max-w-md mx-auto leading-relaxed">
-            You've met everyone! Please return your iPad to the front desk.
+            You've met everyone! Thank you for being part of this event. We hope you had a great time and made some meaningful connections. We'll be in touch soon with your match results.
           </p>
-          <div className="mt-12 bg-blue-600/20 border border-blue-500/30 p-6 rounded-3xl">
-            <p className="text-blue-400 font-bold uppercase tracking-widest">Next Step</p>
-            <p className="text-white text-lg">Check your email tomorrow for matches!</p>
-          </div>
         </div>
       )}
 
@@ -242,7 +292,7 @@ if (isMoving) {
         {decisionMade || !partner || !isMatch ? (
           <div className="text-center">
             <h1 className="text-4xl font-black mb-6 uppercase">
-              {user.gender === 'woman' ? "Stay Seated" : "Time to Rotate!"}
+              {user.gender === 'woman' ? "Please remain seated." : "Please move to the next numbered table."}
             </h1>
             <div className="bg-white text-orange-600 rounded-full w-48 h-48 flex flex-col items-center justify-center shadow-2xl mb-8 mx-auto">
               <p className="text-xs font-bold uppercase">Table</p>
@@ -252,13 +302,35 @@ if (isMoving) {
           </div>
         ) : (
           <div className="w-full max-w-xl text-center">
+            <h2 className="text-3xl font-bold mb-2">What table were you just at?</h2>
+            <textarea className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg outline-none focus:bg-white"
+              placeholder={`Table ${tableToShow}`}
+              value={tableToShow}
+              onChange={(e) => setTableAnswer(e.target.value)}
+            />
+
             <h2 className="text-3xl font-bold mb-2">How was your date with</h2>
             <h1 className="text-6xl font-black mb-12">{partner.name}?</h1>
+            <h2 className="text-3xl font-bold mb-2">Are you interested?</h2>
             <div className="flex flex-col gap-4">
-              <button onClick={() => handleSelection('yes')} className="w-full py-6 bg-white text-green-600 rounded-2xl text-3xl font-black shadow-xl">Interested</button>
-              <button onClick={() => handleSelection('maybe')} className="w-full py-6 bg-white text-blue-600 rounded-2xl text-3xl font-black shadow-xl">Maybe</button>
-              <button onClick={() => handleSelection('no')} className="w-full py-4 bg-orange-800 text-orange-200 rounded-2xl text-xl font-bold">No thanks</button>
+              <button onClick={() => handleInterestedSelection('yes')} className="w-full py-6 bg-white text-green-600 rounded-2xl text-3xl font-black shadow-xl">Interested</button>
+              <button onClick={() => handleInterestedSelection('maybe')} className="w-full py-6 bg-white text-blue-600 rounded-2xl text-3xl font-black shadow-xl">Maybe</button>
+              <button onClick={() => handleInterestedSelection('no')} className="w-full py-4 bg-orange-800 text-orange-200 rounded-2xl text-xl font-bold">No thanks</button>
             </div>
+            {/* Ask for optional private notes*/}
+            <h2 className="text-3xl font-bold mt-12 mb-2">Optional: Private Notes for Organizer</h2>
+            <textarea 
+              className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg outline-none focus:bg-white"
+              placeholder={`E.g. "Great conversation about travel, but prefer not to match."`}
+              onChange={(e) => setOptionalNotes(e.target.value)}
+            />
+            {/* Submit Button that gathers the information and saves it in the user db on firebase as a new entry under user ID */}
+            <button 
+              onClick={() => saveInformationAndContinue()}
+              className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold"
+            >
+              Submit Feedback
+            </button>
           </div>
         )}
 
@@ -312,7 +384,7 @@ return (
         <p className="text-blue-600 font-black tracking-widest uppercase text-sm">Round {currentRound} of {totalPotentialRounds}</p>
         <p className="text-slate-400 font-bold">Table {tableToShow}</p>
       </div>
-      <p className="text-slate-400 uppercase font-bold tracking-tighter mb-2 tracking-[0.2em]">Talking to</p>
+      <p className="text-slate-400 uppercase font-bold mb-2 tracking-[0.2em]">Talking to</p>
       <h2 className="text-7xl font-black text-slate-900 mb-8">{partner?.name || "Searching..."}</h2>
       <div className="bg-white px-12 py-6 rounded-[2.5rem] shadow-xl border border-slate-100">
         <p className="text-6xl font-mono font-bold text-slate-800">

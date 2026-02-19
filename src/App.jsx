@@ -2,10 +2,9 @@ import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
 import RegistrationForm from "./RegistrationForm";
 import AdminDashboard from "./AdminDashboard";
 import Gatekeeper from "./Gatekeeper";
-import EventController from "./EventController";
 import AdminGuard from "./AdminGuard";
 import SelfCheckIn from "./SelfCheckIn";
-import { Tablet, ShieldCheck, UserPlus } from "lucide-react"; // Added icons for clarity
+import { Tablet, ShieldCheck, UserPlus } from "lucide-react";
 
 function Home() {
   return (
@@ -81,7 +80,6 @@ function App() {
               <span className="text-blue-900 text-sm align-top ml-1">●</span>
             </Link>
 
-            {/* Change: Removed 'hidden' and 'md:flex'. Added 'flex' and responsive gap */}
             <div className="flex space-x-4 md:space-x-8 text-[10px] md:text-xs uppercase tracking-widest font-bold text-slate-400">
               <Link
                 to="/register"
@@ -109,25 +107,10 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/register" element={<RegistrationForm />} />
-
             <Route
               path="/event"
-              element={
-                <AdminGuard>
-                  <Gatekeeper />
-                </AdminGuard>
-              }
+              element={<Gatekeeper /> }
             />
-
-            <Route
-              path="/live"
-              element={
-                <AdminGuard>
-                  <EventController />
-                </AdminGuard>
-              }
-            />
-
             <Route
               path="/admin"
               element={
@@ -136,7 +119,6 @@ function App() {
                 </AdminGuard>
               }
             />
-
             <Route path="/scan" element={<SelfCheckIn />} />
           </Routes>
         </main>
