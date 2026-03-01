@@ -233,7 +233,11 @@ export default function AdminDashboard() {
     );
     const attSnap = await getDocs(attQuery);
     const resetPromises = attSnap.docs.map((doc) =>
-      updateDoc(doc.ref, { checkedIn: false, eventLabel: null, tableNumber: null }),
+      updateDoc(doc.ref, {
+        checkedIn: false,
+        eventLabel: null,
+        tableNumber: null,
+      }),
     );
     await Promise.all(resetPromises);
   };
@@ -268,7 +272,11 @@ export default function AdminDashboard() {
       const registration = regSnap.data();
 
       if (!newStatus) {
-        await updateDoc(regRef, { checkedIn: false, eventLabel: null, tableNumber: null });
+        await updateDoc(regRef, {
+          checkedIn: false,
+          eventLabel: null,
+          tableNumber: null,
+        });
         return;
       }
 
@@ -364,11 +372,15 @@ export default function AdminDashboard() {
   };
 
   const deleteUserFromMaster = async (userId, name) => {
-    if (window.confirm(`Permanently delete ${name} from the Master List? This cannot be undone.`)) {
-      try {      
-        await deleteDoc(doc(db, "users", userId));      
+    if (
+      window.confirm(
+        `Permanently delete ${name} from the Master List? This cannot be undone.`,
+      )
+    ) {
+      try {
+        await deleteDoc(doc(db, "users", userId));
       } catch (err) {
-        console.error("Error deleting user:", err);      
+        console.error("Error deleting user:", err);
       }
     }
   };
@@ -474,6 +486,17 @@ export default function AdminDashboard() {
   // Helper to get a user's event history
   const getUserHistory = (userId) => {
     const userRegs = allRegistrations.filter((r) => r.userId === userId);
+    const eventNames = userRegs
+      .map((r) => {
+        const event = events.find((e) => e.id === r.eventId);
+        return event ? event.name : null;
+      })
+      .filter(Boolean);
+    return eventNames;
+  };
+
+  const getUserAttendedHistory = (userId) => {
+    const userRegs = allRegistrations.filter((r) => r.userId === userId && r.status === "attended");
     const eventNames = userRegs
       .map((r) => {
         const event = events.find((e) => e.id === r.eventId);
@@ -1368,6 +1391,9 @@ export default function AdminDashboard() {
                             <th className="px-6 py-4">Signup Date</th>
                           )}
                           {activeTab === "master" && (
+                            <th className="px-6 py-4">Event Registration</th>
+                          )}
+                          {activeTab === "master" && (
                             <th className="px-6 py-4">Event History</th>
                           )}
                           {activeTab === "events" && (
@@ -1457,7 +1483,6 @@ export default function AdminDashboard() {
                                 reg.eventId === targetEventId,
                             );
 
-                            // Fix the "New Group" logic to reference the correct array
                             let isNewGroup = false;
                             if (activeTab === "events" && index > 0) {
                               // Compare against the previous item in the SORTED list, not filteredAttendees
@@ -1469,6 +1494,10 @@ export default function AdminDashboard() {
                               <tr
                                 key={a.id}
                                 className={`border-b transition-colors ${
+                                  isNewGroup && activeTab === "events"
+                                    ? "border-t-4 border-t-slate-300"
+                                    : ""
+                                } ${
                                   isAlreadyInEvent
                                     ? "bg-slate-200/70"
                                     : "hover:bg-blue-50"
@@ -1502,7 +1531,9 @@ export default function AdminDashboard() {
                                 )}
 
                                 {/* Permanent Name Column */}
-                                <td className={`px-6 py-4 sticky left-0 z-10 border-r border-slate-100 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-blue-50"}`}>
+                                <td
+                                  className={`px-6 py-4 sticky left-0 z-10 border-r border-slate-100 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-blue-50"}`}
+                                >
                                   <p className="font-bold text-slate-900">
                                     {a.firstName} {a.lastName}
                                   </p>
@@ -1528,14 +1559,21 @@ export default function AdminDashboard() {
                                   </td>
                                 )}
 
-                                {/* Event History */}
+                                {/* Event Registration (Events this user has signed up for but not necessarily attended) */}
                                 {activeTab === "master" && (
                                   <td className="px-6 py-4 text-slate-500 text-xs italic">
                                     {getUserHistory(a.id).join(", ") || "-"}
                                   </td>
                                 )}
 
-                                {/* Confirmation Status, possible values are: Invited, Confirmed, Declined, Waitlist, and No Response */}
+                                {/* Event History (Events this user has attended) */}
+                                {activeTab === "master" && (
+                                  <td className="px-6 py-4 text-slate-500 text-xs italic">
+                                    {getUserAttendedHistory(a.id).join(", ") || "-"}
+                                  </td>
+                                )}
+
+                                {/* Confirmation Status, possible values are: Invited, Confirmed, Declined, Waitlist, Attended, and No Response */}
                                 {activeTab === "events" && (
                                   <td className="px-6 py-4">
                                     <select
@@ -1558,6 +1596,7 @@ export default function AdminDashboard() {
                                         Confirmed
                                       </option>
                                       <option value="declined">Declined</option>
+                                      <option value="attended">Attended</option>
                                       <option value="no response">
                                         No Response
                                       </option>
@@ -1652,34 +1691,35 @@ export default function AdminDashboard() {
                                 {/* Event Label */}
                                 {activeTab === "events" && (
                                   <td className="px-6 py-4 text-[11px]">
-                                  <textarea
-                                    className="bg-transparent border border-slate-100 rounded p-1 w-auto h-auto leading-tight outline-none focus:bg-white"
-                                    value={a.eventLabel || ""}
-                                    onChange={(e) =>
-                                      updateAttendeeField(a,
-                                        "eventLabel",
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                </td>
+                                    <textarea
+                                      className="bg-transparent border border-slate-100 rounded p-1 w-auto h-auto leading-tight outline-none focus:bg-white"
+                                      value={a.eventLabel || ""}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "eventLabel",
+                                          e.target.value,
+                                        )
+                                      }
+                                    />
+                                  </td>
                                 )}
 
                                 {/* Table Number */}
                                 {activeTab === "events" && (
                                   <td className="px-6 py-4 text-[11px]">
-                                  <textarea
-                                    className="bg-transparent border border-slate-100 rounded p-1 w-auto h-auto leading-tight outline-none focus:bg-white"
-                                    value={a.tableNumber || ""}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "tableNumber",
-                                        e.target.value,
-                                      )
-                                    }
-                                  />
-                                </td>
+                                    <textarea
+                                      className="bg-transparent border border-slate-100 rounded p-1 w-auto h-auto leading-tight outline-none focus:bg-white"
+                                      value={a.tableNumber || ""}
+                                      onChange={(e) =>
+                                        updateAttendeeField(
+                                          a,
+                                          "tableNumber",
+                                          e.target.value,
+                                        )
+                                      }
+                                    />
+                                  </td>
                                 )}
 
                                 {/* Ethnicity */}
@@ -1880,9 +1920,18 @@ export default function AdminDashboard() {
                                 </td>
 
                                 {/* Actions */}
-                                <td className={`px-6 py-4 text-right sticky right-0 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-blue-50"}`}>
+                                <td
+                                  className={`px-6 py-4 text-right sticky right-0 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-blue-50"}`}
+                                >
                                   <button
-                                    onClick={() => activeTab === "master" ? deleteUserFromMaster(a.id, a.name) : deleteAttendee(a.id, a.firstName + " " + a.lastName)}
+                                    onClick={() =>
+                                      activeTab === "master"
+                                        ? deleteUserFromMaster(a.id, a.name)
+                                        : deleteAttendee(
+                                            a.id,
+                                            a.firstName + " " + a.lastName,
+                                          )
+                                    }
                                     className="p-2 text-slate-300 hover:text-red-500 transition-all"
                                   >
                                     <UserMinus size={18} />

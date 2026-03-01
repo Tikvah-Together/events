@@ -145,7 +145,7 @@ const handleSubmit = async (e) => {
       eventId: eventId,
       checkedIn: false,
       tableNumber: null,
-      status: "pending invite", // other e.g., invited, confirmed, declined, waitlist, no response ()
+      status: "pending invite", // other e.g., invited, confirmed, declined, waitlist, no response (3 days after invite)
       groupId: "Group 1", // Default group assignment
       timestamp: new Date(),
       // We store a few redundant fields for quick filtering in Admin without extra joins
@@ -176,26 +176,25 @@ const handleSubmit = async (e) => {
             Registering for: {selectedEventName || "Loading event..."}
           </p>
         ) : (
-          <></>
-          // <div className="mb-8">
-          //   <label className="block font-semibold mb-2 text-center text-slate-600">
-          //     Select Event
-          //   </label>
-          //   <select
-          //     className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          //     value={formData.eventId}
-          //     onChange={(e) =>
-          //       setFormData({ ...formData, eventId: e.target.value })
-          //     }
-          //   >
-          //     <option value="">-- Choose an Event --</option>
-          //     {events.map((ev) => (
-          //       <option key={ev.id} value={ev.id}>
-          //         {ev.name}
-          //       </option>
-          //     ))}
-          //   </select>
-          // </div>
+          <div className="mb-8">
+            <label className="block font-semibold mb-2 text-center text-slate-600">
+              Select Event
+            </label>
+            <select
+              className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              value={formData.eventId}
+              onChange={(e) =>
+                setFormData({ ...formData, eventId: e.target.value })
+              }
+            >
+              <option value="">-- Choose an Event --</option>
+              {events.map((ev) => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.name}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
