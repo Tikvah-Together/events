@@ -57,6 +57,7 @@ export default function AdminDashboard() {
     dressStyle: "all",
     startDate: "",
     endDate: "",
+    status: "all",
   };
   const [filters, setFilters] = useState(INITIAL_FILTERS);
 
@@ -496,7 +497,9 @@ export default function AdminDashboard() {
   };
 
   const getUserAttendedHistory = (userId) => {
-    const userRegs = allRegistrations.filter((r) => r.userId === userId && r.status === "attended");
+    const userRegs = allRegistrations.filter(
+      (r) => r.userId === userId && r.status === "attended",
+    );
     const eventNames = userRegs
       .map((r) => {
         const event = events.find((e) => e.id === r.eventId);
@@ -1291,6 +1294,32 @@ export default function AdminDashboard() {
                           <option value="skirtsPants">Skirts + Pants</option>
                         </select>
                       </div>
+
+                      {/* Confirmation Status */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
+                          Confimation Status
+                        </label>
+                        <select
+                          className="w-full p-2 border border-blue-200 rounded text-xs bg-white"
+                          value={filters.status}
+                          onChange={(e) =>
+                            setFilters({
+                              ...filters,
+                              status: e.target.value,
+                            })
+                          }
+                        >
+                          <option value="all">Any Status</option>
+                          <option value="attended">Attended</option>
+                          <option value="pending invite">Pending Invite</option>
+                          <option value="invited">Invited</option>
+                          <option value="confirmed">Confirmed</option>
+                          <option value="declined">Declined</option>
+                          <option value="waitlist">Waitlist</option>
+                          <option value="no response">No Response</option>
+                        </select>
+                      </div>
                     </div>
                   )}
                   {activeTab === "master" && (
@@ -1439,6 +1468,12 @@ export default function AdminDashboard() {
                               ? filteredMasterList
                               : filteredAttendees
                           ).filter((user) => {
+                            if (
+                              activeTab === "events" &&
+                              filters.status !== "all"
+                            ) {
+                              if (user.status !== filters.status) return false;
+                            }
                             if (!filters.startDate && !filters.endDate)
                               return true;
 
@@ -1460,7 +1495,6 @@ export default function AdminDashboard() {
                               adjustedEnd.setHours(23, 59, 59);
                               if (signupDate > adjustedEnd) return false;
                             }
-                            return true;
                           });
 
                           // Apply sorting (By Name for Master, By Group for Events)
@@ -1569,11 +1603,12 @@ export default function AdminDashboard() {
                                 {/* Event History (Events this user has attended) */}
                                 {activeTab === "master" && (
                                   <td className="px-6 py-4 text-slate-500 text-xs italic">
-                                    {getUserAttendedHistory(a.id).join(", ") || "-"}
+                                    {getUserAttendedHistory(a.id).join(", ") ||
+                                      "-"}
                                   </td>
                                 )}
 
-                                {/* Confirmation Status, possible values are: Invited, Confirmed, Declined, Waitlist, Attended, and No Response */}
+                                {/* Confirmation Status, possible values are: Pending Invite, Invited, Confirmed, Declined, Waitlist, Attended, and No Response */}
                                 {activeTab === "events" && (
                                   <td className="px-6 py-4">
                                     <select
