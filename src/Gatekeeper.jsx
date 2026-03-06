@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { db } from './firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, orderBy, limit } from 'firebase/firestore';
 import LiveRoundView from './LiveRoundView';
-import { Clock, Smartphone, Mail, ArrowRight, Loader2 } from 'lucide-react';
+import { Clock, Smartphone, Mail, ArrowRight, Loader2, ShieldCheck, ClipboardEdit } from 'lucide-react';
 
 export default function Gatekeeper() {
   const [loading, setLoading] = useState(true);
@@ -11,7 +11,11 @@ export default function Gatekeeper() {
   const [attendees, setAttendees] = useState([]);
   const [myProfile, setMyProfile] = useState(null);
   const [masterUsers, setMasterUsers] = useState([]);
+  const [viewMode, setViewMode] = useState('user'); // 'user' or 'admin'
   
+  // Admin Entry Modal State
+  const [adminTargetUser, setAdminTargetUser] = useState(null);
+  const [manualEntry, setManualEntry] = useState({ partnerId: '', interest: 'yes', round: 1 });
   // Login State
   const [loginInput, setLoginInput] = useState('');
   const [error, setError] = useState('');
@@ -87,11 +91,117 @@ const handleVerifyIdentity = async (e) => {
   }
 };
 
+// --- ADMIN ACTIONS ---
+  const handleAdminSubmit = async () => {
+    if (!adminTargetUser || !manualEntry.partnerId) return;
+    
+    try {
+      const userRef = doc(db, "users", adminTargetUser.id);
+      await updateDoc(userRef, {
+        feedbackData: arrayUnion({
+          partnerId: manualEntry.partnerId,
+          interested: manualEntry.interest,
+          round: manualEntry.round,
+          tableNumber: "Admin Entry",
+          timestamp: new Date()
+        })
+      });
+      alert(`Entry saved for ${adminTargetUser.firstName}`);
+      setAdminTargetUser(null);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
         <Loader2 className="animate-spin mb-4" size={48} />
-        <p className="text-slate-400 font-medium">Locating latest event...</p>
+        <p className="text-slate-400 font-medium">Loading events...</p>
+      </div>
+    );
+  }
+
+  // --- VIEW: ADMIN DASHBOARD ---
+  if (viewMode === 'admin') {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <h1 className="text-2xl font-black text-slate-900 uppercase">Event Control Room</h1>
+              <p className="text-slate-500">{currentEvent?.name} • {attendees.length} Checked In</p>
+            </div>
+            <button onClick={() => setViewMode('user')} className="bg-slate-200 px-4 py-2 rounded-lg font-bold text-sm">Switch to User View</button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {masterUsers.filter(u => attendees.some(reg => reg.userId === u.id)).map(user => (
+              <div key={user.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="font-bold text-lg">{user.firstName} {user.lastName}</h3>
+                    <p className="text-xs text-slate-400 uppercase font-bold tracking-widest">{user.gender} • Table {user.tableNumber || 'N/A'}</p>
+                  </div>
+                  <button 
+                    onClick={() => setAdminTargetUser(user)}
+                    className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors"
+                  >
+                    <ClipboardEdit size={20} />
+                  </button>
+                </div>
+                <div className="text-xs text-slate-500">
+                  Feedback recorded: {user.feedbackData?.length || 0} rounds
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* MANUAL ENTRY MODAL */}
+        {adminTargetUser && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
+              <h2 className="text-xl font-bold mb-1">Manual Entry</h2>
+              <p className="text-sm text-slate-500 mb-6">Recording response for <b>{adminTargetUser.firstName}</b></p>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400">Met with (Partner Name)</label>
+                  <select 
+                    className="w-full p-3 bg-slate-50 border rounded-xl"
+                    onChange={(e) => setManualEntry({...manualEntry, partnerId: e.target.value})}
+                  >
+                    <option value="">Select Partner...</option>
+                    {masterUsers.filter(u => u.gender !== adminTargetUser.gender).map(p => (
+                      <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400">Response</label>
+                  <div className="flex gap-2">
+                    {['yes', 'maybe', 'no'].map(opt => (
+                      <button 
+                        key={opt}
+                        onClick={() => setManualEntry({...manualEntry, interest: opt})}
+                        className={`flex-1 py-3 rounded-xl font-bold capitalize border-2 ${manualEntry.interest === opt ? 'border-blue-600 bg-blue-50 text-blue-600' : 'border-slate-100'}`}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-4 pt-4">
+                  <button onClick={() => setAdminTargetUser(null)} className="flex-1 py-4 font-bold text-slate-400">Cancel</button>
+                  <button onClick={handleAdminSubmit} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold">Save Entry</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -102,7 +212,7 @@ const handleVerifyIdentity = async (e) => {
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
         <div className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-lg">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-black text-slate-900 mb-2">Check In</h1>
+            <h1 className="text-3xl font-black text-slate-900 mb-2">Dashboard Login</h1>
             <p className="text-slate-500 font-medium">
               {currentEvent ? `Welcome to ${currentEvent.name}` : "Please verify your registration"}
             </p>
@@ -144,9 +254,12 @@ const handleVerifyIdentity = async (e) => {
             </button>
           </form>
 
-          <p className="mt-8 text-center text-slate-400 text-xs uppercase tracking-tighter font-bold">
-            Secure iPad Entry System
-          </p>
+          <button 
+            onClick={() => setViewMode('admin')}
+            className="w-full mt-8 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-blue-600 transition-colors"
+          >
+            <ShieldCheck size={14} /> Admin Access
+          </button>
         </div>
       </div>
     );

@@ -1,67 +1,113 @@
-import { useState, useEffect, useRef, use } from 'react';
-import { db } from './firebase';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { MapPin, PartyPopper, Maximize, Coffee } from 'lucide-react';
+import { useState, useEffect, useRef, use } from "react";
+import { db } from "./firebase";
+import { doc, updateDoc, arrayUnion } from "firebase/firestore";
+import {
+  MapPin,
+  PartyPopper,
+  Maximize,
+  Star,
+  AlertCircle,
+} from "lucide-react";
 
 export default function LiveRoundView({ event, user, attendees }) {
   const [now, setNow] = useState(new Date());
   const [decisionMade, setDecisionMade] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailInput, setEmailInput] = useState("");
-  const [pendingSelection, setPendingSelection] = useState(null);
+  const [pendingSelection, setPendingSelection] = useState(null); // yes, maybe, no
+  const [isPriority, setIsPriority] = useState(false); // Track if current 'yes' is a priority
+  const [showPriorityConfirm, setShowPriorityConfirm] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [tableAnswer, setTableAnswer] = useState("");
   const [optionalNotes, setOptionalNotes] = useState("");
   const containerRef = useRef(null);
-
   // --- 1. COMPATIBILITY FILTER ---
   // This logic runs every time the partner changes
-// --- 1. COMPATIBILITY FILTER ---
-  const checkCompatibility = (me, partner) => {// TODO see if parents should be considered
-    // if (!partner) return false;
+  // --- 1. COMPATIBILITY FILTER ---
+  const checkCompatibility = (me, partner) => {
+    if (!partner) return false;
 
-    // // A. Age Filter (Simple min/max check)
-    // if (me.ageRange.max > partner.age && partner.age > me.ageRange.min) return false;
-    // console.log("Age compatibility passed.");
+    // Kohen Logic
+    // If user is a male Kohen and partner is female divorced, return false
+    if (me.isKohen && me.gender === 'man' && partner.gender === 'woman' && partner.maritalStatus === 'Divorced') {
+      console.log("Kohen compatibility failed.");
+      return false;
+    }
+    console.log("Kohen compatibility passed.");
 
-    // // B. Kohen Logic
-    // // If user is a male Kohen and partner is female divorced, return false
-    // if (me.isKohen && me.gender === 'man' && partner.gender === 'woman' && partner.maritalStatus === 'Divorced') return false;
-    // console.log("Kohen compatibility passed.");
+    // TODO - Add more filters here as needed, such as age range, shared interests, etc.
 
-    // // C. Ethnicity Filter
-    // // If I have preferences set, check if partner's ethnicity is in my allowed list
-    // if (me.openToEthnicities && me.openToEthnicities.length > 0) {
-    //   if (!me.openToEthnicities.includes(partner.ethnicity)) return false;
-    // }
-    // console.log("Ethnicity compatibility passed.");
-
-    // // D. Marital Status Filter
-    // // Checks if partner's status (Single, Divorced, Widowed) is in my allowed list
-    // if (me.openToMaritalStatus && me.openToMaritalStatus.length > 0) {
-    //   if (!me.openToMaritalStatus.includes(partner.maritalStatus)) return false;
-    // }
-    // console.log("Marital status compatibility passed.");
-
-    // // E. Subgroup Filter (Ashkenazi, Sephardic, Lubavitch, etc.)
-    // if (me.openToSubGroups && me.openToSubGroups.length > 0) {
-    //   if (!me.openToSubGroups.includes(partner.subgroup)) return false;
-    // }
-    // console.log("Subgroup compatibility passed.");
-
-    // If all checks pass, it's a valid date
+    // If all checks pass, it's a valid shidduch
     return true;
+  };
+
+  // --- 1. PRIORITY LOGIC ---
+  // Find if the user has already prioritized someone in this specific event
+  const existingPriorityMatch = user.feedbackData?.find(
+    (f) => f.event === event.id && f.priority === true,
+  );
+
+  const handlePriorityToggle = () => {
+    // If turning on and someone else is already prioritized
+    if (!isPriority && existingPriorityMatch) {
+      setShowPriorityConfirm(true);
+    } else {
+      setIsPriority(!isPriority);
+    }
+  };
+
+  const confirmPrioritySwitch = () => {
+    setIsPriority(true);
+    setShowPriorityConfirm(false);
   };
 
   // Toggle Fullscreen Function
   const enterFullscreen = () => {
     if (containerRef.current.requestFullscreen) {
       containerRef.current.requestFullscreen();
-    } else if (containerRef.current.webkitRequestFullscreen) { /* iPad Safari */
+    } else if (containerRef.current.webkitRequestFullscreen) {
+      /* iPad Safari */
       containerRef.current.webkitRequestFullscreen();
     }
     setIsFullscreen(true);
   };
+
+  // Add this inside your LiveRoundView component
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      // Check if any element is currently in fullscreen
+      const isActuallyFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      );
+
+      setIsFullscreen(isActuallyFullscreen);
+    };
+
+    // Listen for the event on the document
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange); // For Safari/iPad
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener(
+        "webkitfullscreenchange",
+        handleFullscreenChange,
+      );
+      document.removeEventListener(
+        "mozfullscreenchange",
+        handleFullscreenChange,
+      );
+      document.removeEventListener(
+        "MSFullscreenChange",
+        handleFullscreenChange,
+      );
+    };
+  }, []);
 
   useEffect(() => {
     const hasEmail = !!user.email;
@@ -73,324 +119,365 @@ export default function LiveRoundView({ event, user, attendees }) {
     return () => clearInterval(timer);
   }, []);
 
-  if (!event || !event.startTime) return (
-    <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
-      <p className="animate-pulse">Initializing Event...</p>
-    </div>
-  );
+  // Reset local decision state for the new round
+  useEffect(() => {
+    setDecisionMade(false);
+    setIsPriority(false); // Reset priority toggle for the new person
+    setOptionalNotes("");
+  }, [currentRound]);
 
-// --- MATH & STOP LOGIC ---
-const startTime = event.startTime.toDate();
+  if (!event || !event.startTime)
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
+        <p className="animate-pulse">Initializing Event...</p>
+      </div>
+    );
+
+// --- 1. PARSE USER TABLE & GROUP ---
+  // Format: "Table 1 - YP" -> tablePart: "Table 1", groupName: "YP", startTableNum: 1
+  const tableString = user.tableNumber || "Table 1 - Default";
+  const [tablePart, groupName] = tableString.split(" - ");
+  const startTableNum = parseInt(tablePart.replace("Table ", ""), 10) || 1;
+
+  // --- 2. DYNAMIC GROUP MATH ---
+  // We need to know how many tables are in THIS specific group so rotation works
+  const groupAttendees = attendees.filter(a => a.tableNumber?.includes(` - ${groupName}`));
+  const uniqueTablesInGroup = [...new Set(groupAttendees.map(a => a.tableNumber))];
+  const totalTablesInGroup = uniqueTablesInGroup.length || 1;
+
+  // --- 3. MATH & STOP LOGIC ---
+  const startTime = event.startTime.toDate();
   const secondsSinceStart = Math.floor((now - startTime) / 1000);
-  const prepBuffer = 60; 
-  const roundTimeSeconds = (event.roundTime || 7) * 60; 
+  const prepBuffer = 60;
+  const roundTimeSeconds = (event.roundTime || 7) * 60;
   const roundLengthPlusMove = roundTimeSeconds + prepBuffer;
 
   const isEventStarting = secondsSinceStart < prepBuffer;
   const secondsAfterPrep = secondsSinceStart - prepBuffer;
-  const currentRound = isEventStarting ? 1 : Math.floor(secondsAfterPrep / roundLengthPlusMove) + 1;
+  const currentRound = isEventStarting
+    ? 1
+    : Math.floor(secondsAfterPrep / roundLengthPlusMove) + 1;
 
-  const totalTables = event.totalTables || 1; 
-  const totalPotentialRounds = totalTables; 
-  const timeInCurrentBlock = isEventStarting ? 0 : secondsAfterPrep % roundLengthPlusMove;
+  // Total rounds is usually based on how many tables are in the group
+  const totalPotentialRounds = totalTablesInGroup;
+  const timeInCurrentBlock = isEventStarting
+    ? 0
+    : secondsAfterPrep % roundLengthPlusMove;
 
   const isLastRound = currentRound === totalPotentialRounds;
-  const isEventOver = currentRound > totalPotentialRounds || (isLastRound && timeInCurrentBlock >= roundTimeSeconds);
-  const isMoving = !isEventStarting && !isEventOver && timeInCurrentBlock >= roundTimeSeconds;
+  const isEventOver =
+    currentRound > totalPotentialRounds ||
+    (isLastRound && timeInCurrentBlock >= roundTimeSeconds);
+  const isMoving =
+    !isEventStarting && !isEventOver && timeInCurrentBlock >= roundTimeSeconds;
 
-  const secondsLeft = isEventStarting 
+  const secondsLeft = isEventStarting
     ? prepBuffer - secondsSinceStart
-    : isMoving 
-      ? roundLengthPlusMove - timeInCurrentBlock 
-      : isEventOver ? 0 : roundTimeSeconds - timeInCurrentBlock;
+    : isMoving
+      ? roundLengthPlusMove - timeInCurrentBlock
+      : isEventOver
+        ? 0
+        : roundTimeSeconds - timeInCurrentBlock;
+
+  // --- 4. TABLE ROTATION (STRING AWARE) ---
+  let activeNum = startTableNum;
+  if (user.gender === "man") {
+    // Man rotates: (Start + RoundOffset) % Total
+    activeNum = ((startTableNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
+  }
+
+  const nextNum = user.gender === "man"
+    ? ((startTableNum + currentRound - 1) % totalTablesInGroup) + 1
+    : startTableNum;
+
+  // Re-construct the strings for the UI and Matching
+  const activeRoundTable = `Table ${activeNum} - ${groupName}`;
+  const tableToShow = isMoving ? `Table ${nextNum} - ${groupName}` : activeRoundTable;
 
   useEffect(() => {
     setDecisionMade(false);
   }, [currentRound]);
 
-  const myStartTable = user.tableNumber || 1;
-  let activeRoundTable = myStartTable;
+  // --- 5. PARTNER MATCHING ---
+  const partner = attendees.find((a) => {
+    if (a.gender === user.gender) return false;
 
-if (user.gender === 'man') {
-    activeRoundTable = ((myStartTable + (currentRound - 1) - 1) % totalTables) + 1;
-}
+    // To find a match, we calculate the partner's CURRENT table string 
+    // and see if it matches the user's CURRENT table string.
+    const pTableString = a.tableNumber || "";
+    const [pTablePart, pGroup] = pTableString.split(" - ");
+    
+    // Safety check: Must be in the same group (YP, etc.)
+    if (pGroup !== groupName) return false;
 
-const tableToShow = (isMoving && user.gender === 'man') 
-    ? ((myStartTable + (currentRound) - 1) % totalTables) + 1 
-    : activeRoundTable;
+    const pStartNum = parseInt(pTablePart.replace("Table ", ""), 10) || 1;
+    let pCurrentNum = pStartNum;
 
-// --- 3. PARTNER & FILTER VALIDATION ---
-const partner = attendees.find(a => 
-    a.gender !== user.gender && 
-    (user.gender === 'woman' 
-      ? (((a.tableNumber + (currentRound - 1) - 1) % totalTables) + 1 === activeRoundTable)
-      : (a.tableNumber === activeRoundTable))
-  );
+    // If the partner is a man, he is rotating. If a woman, she is stationary.
+    if (a.gender === "man") {
+      pCurrentNum = ((pStartNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
+    }
+
+    const pCurrentTableFull = `Table ${pCurrentNum} - ${pGroup}`;
+    return pCurrentTableFull === activeRoundTable;
+  });
 
   // Check if this partner meets our criteria
   const isMatch = partner ? checkCompatibility(user, partner) : false;
 
   // --- HANDLERS ---
-const handleInterestedSelection = async (type) => {
-    if (type !== 'no' && !user.email && !emailInput) {
-      setPendingSelection(type);
-      return;
-    }
-    submitToFirebase(type);
+  const handleInterestedSelection = (type) => {
+    setPendingSelection(type);
+    if (type !== "yes") setIsPriority(false); // Can't prioritize a 'maybe' or 'no'
   };
 
-  const submitToFirebase = async (type) => {
-    try {
-      const myRef = doc(db, "users", user.id);
-      const updateData = {};
-      
-      if (type === 'yes') updateData.selections = arrayUnion(partner.id);
-      if (type === 'maybe') updateData.maybeSelections = arrayUnion(partner.id);
-      if (emailInput) updateData.email = emailInput;
-
-      await updateDoc(myRef, updateData);
-      setDecisionMade(true);
-    } catch (err) {
-      console.error("Save Error:", err);
-    }
-  };
-
-  const saveInformationAndContinue = () => {
-    if (tableAnswer !== tableToShow) {
+  const saveInformationAndContinue = async () => {
+    if (tableAnswer !== String(tableToShow)) {
       alert("Please enter the correct table number.");
       return;
     }
 
-    const feedbackData = {
+    const myRef = doc(db, "users", user.id);
+    const newFeedbackEntry = {
+      event: event.id,
+      partnerId: partner.id,
+      partnerName: partner.name,
       interested: pendingSelection,
-      tableAnswer,
+      priority: isPriority,
+      tableNumber: tableAnswer,
+      round: currentRound,
       optionalNotes,
+      timestamp: new Date(),
     };
 
-    const myRef = doc(db, "users", user.id);
-    // save the feedback data in a new array entry under "feedbackData" in the user's document in firebase, without overwriting previous entries (use arrayUnion) make sure to save it under the parter's ID as well so we know which feedback corresponds to which partner
-    updateDoc(myRef, {
-      feedbackData: arrayUnion({
-        partnerId: partner.id,
-        ...feedbackData
-      })
-    }).then(() => {
+    try {
+      let finalFeedbackData = [...(user.feedbackData || [])];
+
+      // If this is a new priority, we must find any OLD priority in this event and set it to false
+      if (isPriority) {
+        finalFeedbackData = finalFeedbackData.map((f) =>
+          f.event === event.id ? { ...f, priority: false } : f,
+        );
+      }
+
+      // Add the new entry
+      finalFeedbackData.push(newFeedbackEntry);
+
+      await updateDoc(myRef, {
+        feedbackData: finalFeedbackData,
+        // Keep your legacy arrays if still using them for other logic
+        ...(pendingSelection === "yes" && {
+          selections: arrayUnion(partner.id),
+        }),
+        ...(pendingSelection === "maybe" && {
+          maybeSelections: arrayUnion(partner.id),
+        }),
+        ...(emailInput && { email: emailInput }),
+      });
+
       setDecisionMade(true);
       setShowEmailModal(false);
-    }).catch((err) => {
+    } catch (err) {
       console.error("Error saving feedback:", err);
-    });
+    }
   };
 
-    // --- FULLSCREEN PROMPT ---
-  if (!isFullscreen) {
-    return (
-      <div ref={containerRef} className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-10 text-white">
-        <h1 className="text-4xl font-black mb-8">Ready to Start?</h1>
-        <button 
-          onClick={enterFullscreen}
-          className="flex items-center gap-4 bg-blue-600 px-12 py-6 rounded-3xl text-3xl font-bold shadow-2xl active:scale-95 transition-transform"
-        >
-          <Maximize size={40} /> Enter Fullscreen
-        </button>
-        <p className="mt-6 text-slate-400">This ensures the best experience for your event.</p>
-      </div>
-    );
-  }
+  // --- UI COMPONENTS ---
 
-  // --- UI: EVENT OVER ---
-if (isEventOver) {
-  return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-10 text-center">
-      {(!decisionMade && partner && isMatch) ? (
-        <div className="w-full max-w-xl text-center">
-            <h2 className="text-3xl font-bold mb-2">What table were you just at?</h2>
-            <textarea className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg outline-none focus:bg-white"
-              placeholder={`Table ${tableToShow}`}
-              value={tableToShow}
-              onChange={(e) => setTableAnswer(e.target.value)}
-            />
+  // --- 4. THE RENDERER ---
+  const renderMainContent = () => {
+    // A. GATEKEEPER: Not Fullscreen
+    if (!isFullscreen) {
+      return (
+        <div className="flex flex-col items-center justify-center p-10 text-center">
+          <h1 className="text-4xl font-black mb-8">Ready to Start?</h1>
+          <button onClick={enterFullscreen} className="flex items-center gap-4 bg-blue-600 px-12 py-6 rounded-3xl text-3xl font-bold shadow-2xl active:scale-95 transition-transform">
+            <Maximize size={40} /> Enter Fullscreen
+          </button>
+        </div>
+      );
+    }
 
-            <h2 className="text-3xl font-bold mb-2">How was your date with</h2>
-            <h1 className="text-6xl font-black mb-12">{partner.name}?</h1>
-            <h2 className="text-3xl font-bold mb-2">Are you interested?</h2>
-            <div className="flex flex-col gap-4">
-              <button onClick={() => handleInterestedSelection('yes')} className="w-full py-6 bg-white text-green-600 rounded-2xl text-3xl font-black shadow-xl">Interested</button>
-              <button onClick={() => handleInterestedSelection('maybe')} className="w-full py-6 bg-white text-blue-600 rounded-2xl text-3xl font-black shadow-xl">Maybe</button>
-              <button onClick={() => handleInterestedSelection('no')} className="w-full py-4 bg-orange-800 text-orange-200 rounded-2xl text-xl font-bold">No thanks</button>
+    // B. EVENT OVER
+    if (isEventOver) {
+      return (
+        <div className="flex flex-col items-center justify-center p-10 text-center">
+          {(decisionMade || !partner || !isMatch) ? (
+            <div className="animate-bounce text-center">
+              <PartyPopper size={100} className="text-yellow-400 mx-auto mb-4" />
+              <h1 className="text-6xl font-black">All Done!</h1>
             </div>
-            {/* Ask for optional private notes*/}
-            <h2 className="text-3xl font-bold mt-12 mb-2">Optional: Private Notes for Organizer</h2>
-            <textarea 
-              className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg outline-none focus:bg-white"
-              placeholder={`E.g. "Great conversation about travel, but prefer not to match."`}
-              onChange={(e) => setOptionalNotes(e.target.value)}
-            />
-            {/* Submit Button that gathers the information and saves it in the user db on firebase as a new entry under user ID */}
-            <button 
-              onClick={() => saveInformationAndContinue()}
-              className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold"
-            >
-              Submit Feedback
-            </button>
+          ) : <FeedbackForm />}
+        </div>
+      );
+    }
+
+    // C. STARTING BUFFER
+    if (isEventStarting) {
+      return (
+        <div className="flex flex-col items-center justify-center p-10 text-center">
+          <MapPin size={80} className="mb-6 animate-bounce text-white" />
+          <h1 className="text-5xl font-black mb-4 uppercase">Find Your Table</h1>
+          <div className="bg-white text-blue-700 rounded-3xl p-10 shadow-2xl">
+            <p className="text-9xl font-black">{startTableNum}</p>
+            <p className="text-xl font-bold mt-2">{groupName}</p>
           </div>
-      ) : (
-        <div className="animate-in slide-in-from-bottom duration-700">
-          <PartyPopper size={100} className="mb-8 text-yellow-400 mx-auto" />
-          <h1 className="text-7xl font-black mb-4 tracking-tighter">ALL DONE!</h1>
-          <p className="text-2xl text-slate-400 max-w-md mx-auto leading-relaxed">
-            You've met everyone! Thank you for being part of this event. We hope you had a great time and made some meaningful connections. We'll be in touch soon with your match results.
+          <p className="mt-10 text-xl font-medium">Starting in {secondsLeft}s</p>
+        </div>
+      );
+    }
+
+    // D. MOVING / DECISION PHASE
+    if (isMoving) {
+      return (
+        <div className="w-full max-w-xl mx-auto flex flex-col items-center justify-center p-6 text-center">
+          {/* Skip feedback if decision made, no partner found, or partner was not a match */}
+          {decisionMade || !partner || !isMatch ? (
+            <>
+              <h1 className="text-4xl font-black mb-12 uppercase">
+                {user.gender === "woman" ? "Stay at Table" : "Move to Table"}
+              </h1>
+              <div className="bg-white text-slate-900 rounded-full w-64 h-64 flex flex-col items-center justify-center shadow-2xl mb-8 mx-auto border-12 border-blue-500">
+                <p className="text-9xl font-black leading-none">{nextNum}</p>
+              </div>
+              <p className="text-xl font-bold text-slate-400 mb-4">{groupName}</p>
+              <p className="text-3xl font-mono text-blue-400">Next Round: {secondsLeft}s</p>
+            </>
+          ) : <FeedbackForm />}
+        </div>
+      );
+    }
+
+    // E. ACTIVE DATING OR BREAK PHASE
+    if (!partner || !isMatch) {
+      return (
+        <div className="flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-700">
+          <Coffee size={100} className="text-blue-400 mb-8 animate-pulse" />
+          <h2 className="text-6xl font-black mb-4 italic text-white">Break Time!</h2>
+          <p className="text-2xl text-slate-400 max-w-md leading-relaxed">
+            You don't have a match this round. Grab a drink, stretch, and get ready for the next one!
+          </p>
+          <div className="mt-12 bg-slate-800 px-10 py-5 rounded-full border border-slate-700">
+             <p className="text-4xl font-mono font-bold text-blue-400">
+              {Math.floor(secondsLeft / 60)}:{(secondsLeft % 60).toString().padStart(2, "0")}
+            </p>
+          </div>
+          <p className="mt-6 text-slate-500 font-bold uppercase tracking-widest">Table {activeNum}</p>
+        </div>
+      );
+    }
+
+    // F. STANDARD DATING PHASE
+    return (
+      <div className="flex flex-col items-center justify-center p-6 text-center">
+        <div className="mb-12">
+          <p className="text-blue-400 font-black uppercase text-sm mb-2">Round {currentRound} of {totalPotentialRounds}</p>
+          <div className="inline-block px-6 py-2 bg-slate-800 rounded-full border border-slate-700 text-xl font-bold">
+            Table {activeNum} <span className="text-slate-500 mx-2">|</span> {groupName}
+          </div>
+        </div>
+        <p className="text-slate-500 uppercase font-bold mb-4 tracking-[0.3em]">Talking to</p>
+        <h2 className="text-8xl font-black mb-12 tracking-tighter">{partner.name}</h2>
+        <div className="bg-slate-800 px-16 py-8 rounded-[3rem] border-2 border-slate-700 shadow-2xl">
+          <p className="text-7xl font-mono font-bold text-blue-400">
+            {Math.floor(secondsLeft / 60)}:{(secondsLeft % 60).toString().padStart(2, "0")}
           </p>
         </div>
-      )}
+      </div>
+    );
+  };
 
-      {/* Re-include the Email Modal here just in case they haven't entered it by the last round */}
-      {showEmailModal && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50">
-            <div className="bg-white text-slate-900 p-8 rounded-3xl w-full max-w-md">
-              <h2 className="text-2xl font-bold mb-2">One last thing!</h2>
-              <p className="text-slate-500 mb-6">Enter your email to receive your match results.</p>
-              <input 
-                type="email" 
-                className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg"
-                placeholder="email@example.com"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-              />
-              <button 
-                onClick={() => submitToFirebase(pendingSelection)}
-                className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold"
-              >
-                Save & Submit Selection
-              </button>
-            </div>
-          </div>
+  const FeedbackForm = () => (
+    <div className="w-full max-w-xl text-center">
+      <h2 className="text-2xl font-bold mb-2 text-slate-300">
+        Quick check: What table are you at?
+      </h2>
+      <input
+        type="number"
+        className="w-32 p-4 text-center border-2 border-slate-700 bg-slate-800 rounded-xl mb-8 text-3xl text-white font-black"
+        placeholder="#"
+        value={tableAnswer}
+        onChange={(e) => setTableAnswer(e.target.value)}
+      />
+      <h1 className="text-5xl font-black mb-12 text-white">
+        How was {partner?.name}?
+      </h1>
+      <div className="flex flex-col gap-4">
+        <button
+          onClick={() => setPendingSelection("yes")}
+          className={`py-6 rounded-2xl text-3xl font-black ${pendingSelection === "yes" ? "bg-green-600 text-white" : "bg-white text-green-600"}`}
+        >
+          Interested
+        </button>
+        {pendingSelection === "yes" && (
+          <button
+            onClick={handlePriorityToggle}
+            className={`py-4 rounded-xl border-2 flex items-center justify-center gap-3 ${isPriority ? "bg-yellow-500 border-yellow-400 text-white" : "border-slate-600 text-slate-400"}`}
+          >
+            <Star fill={isPriority ? "white" : "none"} />{" "}
+            {isPriority ? "PRIORITY PICK" : "MAKE PRIORITY?"}
+          </button>
         )}
+        <button
+          onClick={() => setPendingSelection("maybe")}
+          className={`py-6 rounded-2xl text-3xl font-black ${pendingSelection === "maybe" ? "bg-blue-600 text-white" : "bg-white text-blue-600"}`}
+        >
+          Maybe
+        </button>
+        <button
+          onClick={() => setPendingSelection("no")}
+          className={`py-4 rounded-2xl text-xl font-bold ${pendingSelection === "no" ? "bg-orange-900 text-orange-200" : "bg-slate-800 text-slate-400"}`}
+        >
+          No thanks
+        </button>
+        <button
+          onClick={saveInformationAndContinue}
+          className="mt-8 py-5 bg-blue-600 text-white rounded-2xl font-black text-2xl"
+        >
+          Submit Selection
+        </button>
+      </div>
     </div>
   );
-}
 
-  // --- UI: INITIAL STARTUP (FIRST 60 SECONDS) ---
-if (isEventStarting) {
-    return (
-      <div className="min-h-screen bg-blue-700 flex flex-col items-center justify-center text-white p-10 text-center">
-        <MapPin size={80} className="mb-6 animate-bounce" />
-        <h1 className="text-5xl font-black mb-4 text-white">FIND YOUR TABLE</h1>
-        <div className="bg-white text-blue-700 rounded-3xl p-10 shadow-2xl">
-          <p className="text-sm uppercase font-bold mb-2">Start at Table</p>
-          <p className="text-9xl font-black">{myStartTable}</p>
-        </div>
-        <p className="mt-10 text-xl font-medium">Starting in {secondsLeft}s</p>
-      </div>
-    );
-  }
+  // --- FINAL RETURN: THE SHELL ---
+  return (
+    <div
+      ref={containerRef}
+      className="min-h-screen bg-slate-900 text-white flex flex-col justify-center items-center overflow-hidden"
+    >
+      {renderMainContent()}
 
-  // --- UI: MOVING / DECISION PHASE ---
-if (isMoving) {
-    return (
-      <div className="min-h-screen bg-orange-600 flex flex-col items-center justify-center text-white p-6">
-        {decisionMade || !partner || !isMatch ? (
-          <div className="text-center">
-            <h1 className="text-4xl font-black mb-6 uppercase">
-              {user.gender === 'woman' ? "Please remain seated." : "Please move to the next numbered table."}
-            </h1>
-            <div className="bg-white text-orange-600 rounded-full w-48 h-48 flex flex-col items-center justify-center shadow-2xl mb-8 mx-auto">
-              <p className="text-xs font-bold uppercase">Table</p>
-              <p className="text-8xl font-black leading-none">{tableToShow}</p>
-            </div>
-            <p className="text-2xl font-mono">Next Round: {secondsLeft}s</p>
-          </div>
-        ) : (
-          <div className="w-full max-w-xl text-center">
-            <h2 className="text-3xl font-bold mb-2">What table were you just at?</h2>
-            <textarea className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg outline-none focus:bg-white"
-              placeholder={`Table ${tableToShow}`}
-              value={tableToShow}
-              onChange={(e) => setTableAnswer(e.target.value)}
-            />
-
-            <h2 className="text-3xl font-bold mb-2">How was your date with</h2>
-            <h1 className="text-6xl font-black mb-12">{partner.name}?</h1>
-            <h2 className="text-3xl font-bold mb-2">Are you interested?</h2>
-            <div className="flex flex-col gap-4">
-              <button onClick={() => handleInterestedSelection('yes')} className="w-full py-6 bg-white text-green-600 rounded-2xl text-3xl font-black shadow-xl">Interested</button>
-              <button onClick={() => handleInterestedSelection('maybe')} className="w-full py-6 bg-white text-blue-600 rounded-2xl text-3xl font-black shadow-xl">Maybe</button>
-              <button onClick={() => handleInterestedSelection('no')} className="w-full py-4 bg-orange-800 text-orange-200 rounded-2xl text-xl font-bold">No thanks</button>
-            </div>
-            {/* Ask for optional private notes*/}
-            <h2 className="text-3xl font-bold mt-12 mb-2">Optional: Private Notes for Organizer</h2>
-            <textarea 
-              className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg outline-none focus:bg-white"
-              placeholder={`E.g. "Great conversation about travel, but prefer not to match."`}
-              onChange={(e) => setOptionalNotes(e.target.value)}
-            />
-            {/* Submit Button that gathers the information and saves it in the user db on firebase as a new entry under user ID */}
-            <button 
-              onClick={() => saveInformationAndContinue()}
-              className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold"
+      {/* GLOBAL MODALS */}
+      {showPriorityConfirm && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-6 z-100 backdrop-blur-sm">
+          <div className="bg-slate-900 border-2 border-yellow-500 p-8 rounded-3xl w-full max-w-md text-center">
+            <AlertCircle size={60} className="text-yellow-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-white mb-4">
+              Switch Priority?
+            </h2>
+            <p className="text-slate-400 mb-8">
+              You already prioritized {existingPriorityMatch?.partnerName}.
+              Switch to {partner?.name}?
+            </p>
+            <button
+              onClick={() => {
+                setIsPriority(true);
+                setShowPriorityConfirm(false);
+              }}
+              className="w-full py-4 bg-yellow-500 text-black rounded-xl font-black uppercase mb-3"
             >
-              Submit Feedback
+              Yes, Switch
+            </button>
+            <button
+              onClick={() => setShowPriorityConfirm(false)}
+              className="w-full py-4 text-slate-400 font-bold"
+            >
+              Cancel
             </button>
           </div>
-        )}
-
-        {showEmailModal && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-6 z-50">
-            <div className="bg-white text-slate-900 p-8 rounded-3xl w-full max-w-md">
-              <h2 className="text-2xl font-bold mb-2">One last thing!</h2>
-              <p className="text-slate-500 mb-6">Enter your email to receive your match results.</p>
-              <input 
-                type="email" 
-                className="w-full p-4 border-2 border-slate-100 rounded-xl mb-6 text-lg"
-                placeholder="email@example.com"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-              />
-              <button 
-                onClick={() => submitToFirebase(pendingSelection)}
-                className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold"
-              >
-                Save & Submit Selection
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // --- UI: DATING OR BREAK PHASE ---
-  // If no match found, show the Break Screen
-  if (!isMatch) {
-    return (
-      <div className="min-h-screen bg-slate-800 flex flex-col items-center justify-center p-10 text-center text-white">
-        <Coffee size={100} className="mb-8 text-blue-400 animate-pulse" />
-        <h1 className="text-6xl font-black mb-4 uppercase">Break Round</h1>
-        <div className="bg-slate-700/50 p-8 rounded-3xl border-2 border-slate-600 mb-8 max-w-md">
-            <p className="text-xl text-slate-300">This partner does not match your specific preferences.</p>
         </div>
-        <div className="mt-12">
-            <p className="text-5xl font-mono font-bold opacity-40">
-                {Math.floor(secondsLeft / 60)}:{(secondsLeft % 60).toString().padStart(2, '0')}
-            </p>
-        </div>
-      </div>
-    );
-  }
-
-return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-      <div className="mb-8">
-        <p className="text-blue-600 font-black tracking-widest uppercase text-sm">Round {currentRound} of {totalPotentialRounds}</p>
-        <p className="text-slate-400 font-bold">Table {tableToShow}</p>
-      </div>
-      <p className="text-slate-400 uppercase font-bold mb-2 tracking-[0.2em]">Talking to</p>
-      <h2 className="text-7xl font-black text-slate-900 mb-8">{partner?.name || "Searching..."}</h2>
-      <div className="bg-white px-12 py-6 rounded-[2.5rem] shadow-xl border border-slate-100">
-        <p className="text-6xl font-mono font-bold text-slate-800">
-          {Math.floor(secondsLeft / 60)}:{(secondsLeft % 60).toString().padStart(2, '0')}
-        </p>
-      </div>
+      )}
     </div>
   );
 }
