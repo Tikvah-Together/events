@@ -42,7 +42,7 @@ function Home() {
           <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-full flex items-center justify-center mb-4 group-hover:bg-orange-500 group-hover:text-white transition-colors">
             <Tablet size={24} />
           </div>
-          <h3 className="font-bold text-lg text-slate-800">Event iPad</h3>
+          <h3 className="font-bold text-lg text-slate-800">Event Login</h3>
           <p className="text-sm text-slate-500 mt-2">
             Claim this device and start your dates
           </p>
@@ -56,7 +56,7 @@ function Home() {
           <div className="w-12 h-12 bg-slate-50 text-slate-600 rounded-full flex items-center justify-center mb-4 group-hover:bg-slate-800 group-hover:text-white transition-colors">
             <ShieldCheck size={24} />
           </div>
-          <h3 className="font-bold text-lg text-slate-800">Organizer</h3>
+          <h3 className="font-bold text-lg text-slate-800">Admin</h3>
           <p className="text-sm text-slate-500 mt-2">
             Manage events and attendees
           </p>
@@ -91,7 +91,7 @@ function App() {
                 to="/event"
                 className="hover:text-orange-600 transition-colors"
               >
-                iPad Login
+                Event Login
               </Link>
               <Link
                 to="/admin"

@@ -140,8 +140,8 @@ export default function LiveRoundView({ event, user, attendees }) {
   const startTableNum = parseInt(tablePart.replace("Table ", ""), 10) || 1;
 
   // --- 2. DYNAMIC GROUP MATH ---
-  // We need to know how many tables are in THIS specific group so rotation works
-  const groupAttendees = attendees.filter(a => a.tableNumber?.includes(` - ${groupName}`));
+  // We need to know how many tables are in THIS specific group so rotation works correctly. We can't just count all attendees with "Table X" because there may be multiple groups (YP, etc.) running simultaneously.
+  const groupAttendees = attendees.filter(a => a.tableNumber?.toLowerCase().includes(` - ${groupName.toLowerCase()}`));
   const uniqueTablesInGroup = [...new Set(groupAttendees.map(a => a.tableNumber))];
   const totalTablesInGroup = uniqueTablesInGroup.length || 1;
 
@@ -246,7 +246,7 @@ export default function LiveRoundView({ event, user, attendees }) {
       priority: isPriority,
       tableNumber: tableAnswer,
       round: currentRound,
-      optionalNotes,
+      optionalNotes: optionalNotes,
       timestamp: new Date(),
     };
 
@@ -388,56 +388,78 @@ export default function LiveRoundView({ event, user, attendees }) {
   };
 
   const FeedbackForm = () => (
-    <div className="w-full max-w-xl text-center">
-      <h2 className="text-2xl font-bold mb-2 text-slate-300">
-        Quick check: What table are you at?
-      </h2>
-      <input
-        type="number"
-        className="w-32 p-4 text-center border-2 border-slate-700 bg-slate-800 rounded-xl mb-8 text-3xl text-white font-black"
-        placeholder="#"
-        value={tableAnswer}
-        onChange={(e) => setTableAnswer(e.target.value)}
-      />
-      <h1 className="text-5xl font-black mb-12 text-white">
-        How was {partner?.name}?
-      </h1>
-      <div className="flex flex-col gap-4">
+  <div className="w-full max-w-xl text-center">
+    <h2 className="text-2xl font-bold mb-2 text-slate-300">
+      Quick check: What table are you at?
+    </h2>
+    <input
+      type="text" // Changed to text as tableNumber is now "Table X - Group"
+      className="w-full max-w-sm p-4 text-center border-2 border-slate-700 bg-slate-800 rounded-xl mb-8 text-2xl text-white font-black"
+      placeholder="e.g. Table 1 - YP"
+      value={tableAnswer}
+      onChange={(e) => setTableAnswer(e.target.value)}
+    />
+
+    <h1 className="text-5xl font-black mb-12 text-white">
+      How was {partner?.name}?
+    </h1>
+
+    <div className="flex flex-col gap-4">
+      {/* Interest Buttons */}
+      <button
+        onClick={() => setPendingSelection("yes")}
+        className={`py-6 rounded-2xl text-3xl font-black transition-colors ${pendingSelection === "yes" ? "bg-green-600 text-white" : "bg-white text-green-600"}`}
+      >
+        Interested
+      </button>
+
+      {pendingSelection === "yes" && (
         <button
-          onClick={() => setPendingSelection("yes")}
-          className={`py-6 rounded-2xl text-3xl font-black ${pendingSelection === "yes" ? "bg-green-600 text-white" : "bg-white text-green-600"}`}
+          onClick={handlePriorityToggle}
+          className={`py-4 rounded-xl border-2 flex items-center justify-center gap-3 transition-all ${isPriority ? "bg-yellow-500 border-yellow-400 text-white" : "border-slate-600 text-slate-400"}`}
         >
-          Interested
+          <Star fill={isPriority ? "white" : "none"} />{" "}
+          {isPriority ? "PRIORITY PICK" : "MAKE PRIORITY?"}
         </button>
-        {pendingSelection === "yes" && (
-          <button
-            onClick={handlePriorityToggle}
-            className={`py-4 rounded-xl border-2 flex items-center justify-center gap-3 ${isPriority ? "bg-yellow-500 border-yellow-400 text-white" : "border-slate-600 text-slate-400"}`}
-          >
-            <Star fill={isPriority ? "white" : "none"} />{" "}
-            {isPriority ? "PRIORITY PICK" : "MAKE PRIORITY?"}
-          </button>
-        )}
-        <button
-          onClick={() => setPendingSelection("maybe")}
-          className={`py-6 rounded-2xl text-3xl font-black ${pendingSelection === "maybe" ? "bg-blue-600 text-white" : "bg-white text-blue-600"}`}
-        >
-          Maybe
-        </button>
-        <button
-          onClick={() => setPendingSelection("no")}
-          className={`py-4 rounded-2xl text-xl font-bold ${pendingSelection === "no" ? "bg-orange-900 text-orange-200" : "bg-slate-800 text-slate-400"}`}
-        >
-          No thanks
-        </button>
-        <button
-          onClick={saveInformationAndContinue}
-          className="mt-8 py-5 bg-blue-600 text-white rounded-2xl font-black text-2xl"
-        >
-          Submit Selection
-        </button>
+      )}
+
+      <button
+        onClick={() => setPendingSelection("maybe")}
+        className={`py-6 rounded-2xl text-3xl font-black transition-colors ${pendingSelection === "maybe" ? "bg-blue-600 text-white" : "bg-white text-blue-600"}`}
+      >
+        Maybe
+      </button>
+
+      <button
+        onClick={() => setPendingSelection("no")}
+        className={`py-4 rounded-2xl text-xl font-bold transition-colors ${pendingSelection === "no" ? "bg-orange-900 text-orange-200" : "bg-slate-800 text-slate-400"}`}
+      >
+        No thanks
+      </button>
+
+      {/* --- OPTIONAL NOTES AREA --- */}
+      <div className="mt-4 text-left">
+        <label className="text-xs font-bold uppercase text-slate-500 ml-2 mb-1 block tracking-widest">
+          Private Notes (Optional)
+        </label>
+        <textarea
+          className="w-full p-4 bg-slate-800 border-2 border-slate-700 rounded-2xl text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none transition-all"
+          rows={3}
+          placeholder="Anything you want to remember about this person..."
+          value={optionalNotes}
+          onChange={(e) => setOptionalNotes(e.target.value)}
+        />
       </div>
+
+      <button
+        onClick={saveInformationAndContinue}
+        disabled={!pendingSelection}
+        className={`mt-8 py-5 rounded-2xl font-black text-2xl transition-all ${!pendingSelection ? "bg-slate-700 text-slate-500 cursor-not-allowed" : "bg-blue-600 text-white shadow-lg shadow-blue-900/20"}`}
+      >
+        Submit Selection
+      </button>
     </div>
+  </div>
   );
 
   // --- FINAL RETURN: THE SHELL ---
