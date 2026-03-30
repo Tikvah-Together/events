@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, use } from "react";
+import { useState, useEffect, useRef, use, act } from "react";
 import { db } from "./firebase";
 import { doc, updateDoc, arrayUnion } from "firebase/firestore";
 import {
@@ -7,10 +7,13 @@ import {
   Maximize,
   Star,
   AlertCircle,
+  Coffee,
 } from "lucide-react";
 
-export default function LiveRoundView({ event, user, attendees }) {
+export default function LiveRoundView({ event, user, attendees, users }) {
+  // Event has the Event collection table, User has the current user profile from the users collection, Attendees is the list of checked-in attendees for this event based on the registrations collection, and Users is the master list of all users from the users table (for partner lookup)
   const [now, setNow] = useState(new Date());
+  const [hasStarted, setHasStarted] = useState(false);
   const [decisionMade, setDecisionMade] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailInput, setEmailInput] = useState("");
@@ -21,21 +24,26 @@ export default function LiveRoundView({ event, user, attendees }) {
   const [tableAnswer, setTableAnswer] = useState("");
   const [optionalNotes, setOptionalNotes] = useState("");
   const containerRef = useRef(null);
-  // --- 1. COMPATIBILITY FILTER ---
+  const debugging = true; // Set to true to show the debug overlay
+  const [showDebug, setShowDebug] = useState(false);
+
   // This logic runs every time the partner changes
-  // --- 1. COMPATIBILITY FILTER ---
+  // --- COMPATIBILITY FILTER ---
   const checkCompatibility = (me, partner) => {
     if (!partner) return false;
 
-    // Kohen Logic
     // If user is a male Kohen and partner is female divorced, return false
-    if (me.isKohen && me.gender === 'man' && partner.gender === 'woman' && partner.maritalStatus === 'Divorced') {
+    if (
+      me.isKohen &&
+      me.gender === "man" &&
+      partner.gender === "woman" &&
+      partner.maritalStatus === "Divorced"
+    ) {
       console.log("Kohen compatibility failed.");
       return false;
     }
-    console.log("Kohen compatibility passed.");
 
-    // TODO - Add more filters here as needed, such as age range, shared interests, etc.
+    // Add more filters here as needed, such as age range, shared interests, etc.
 
     // If all checks pass, it's a valid shidduch
     return true;
@@ -70,6 +78,7 @@ export default function LiveRoundView({ event, user, attendees }) {
       containerRef.current.webkitRequestFullscreen();
     }
     setIsFullscreen(true);
+    setHasStarted(true);
   };
 
   // Add this inside your LiveRoundView component
@@ -119,13 +128,6 @@ export default function LiveRoundView({ event, user, attendees }) {
     return () => clearInterval(timer);
   }, []);
 
-  // Reset local decision state for the new round
-  useEffect(() => {
-    setDecisionMade(false);
-    setIsPriority(false); // Reset priority toggle for the new person
-    setOptionalNotes("");
-  }, [currentRound]);
-
   if (!event || !event.startTime)
     return (
       <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">
@@ -133,33 +135,56 @@ export default function LiveRoundView({ event, user, attendees }) {
       </div>
     );
 
-// --- 1. PARSE USER TABLE & GROUP ---
-  // Format: "Table 1 - YP" -> tablePart: "Table 1", groupName: "YP", startTableNum: 1
-  const tableString = user.tableNumber || "Table 1 - Default";
-  const [tablePart, groupName] = tableString.split(" - ");
+  // --- 1. PARSE USER TABLE & GROUP ---
+  // Logic: "Table 1 - YP" -> "Table 1" and "YP"
+  const userInfoForThisEvent = attendees.find((a) => a.userId === user.id);
+  console.log(userInfoForThisEvent);
+  console.log("User's table number string:", userInfoForThisEvent.tableNumber);
+  const tableString = userInfoForThisEvent.tableNumber || "Table 1 - Default";
+  const tableParts = tableString.split(" - ");
+  console.log("Parsed table parts:", tableParts);
+  const tablePart = tableParts[0] || "Table 1";
+  const groupName = tableParts[1] || "Default"; // Ensure groupName isn't undefined
   const startTableNum = parseInt(tablePart.replace("Table ", ""), 10) || 1;
+  console.log("User's starting table number:", startTableNum);
 
   // --- 2. DYNAMIC GROUP MATH ---
-  // We need to know how many tables are in THIS specific group so rotation works correctly. We can't just count all attendees with "Table X" because there may be multiple groups (YP, etc.) running simultaneously.
-  const groupAttendees = attendees.filter(a => a.tableNumber?.toLowerCase().includes(` - ${groupName.toLowerCase()}`));
-  const uniqueTablesInGroup = [...new Set(groupAttendees.map(a => a.tableNumber))];
-  const totalTablesInGroup = uniqueTablesInGroup.length || 1;
+  // Filter attendees to ONLY those in this user's group (e.g., "YP")
+  const groupAttendees = attendees.filter((a) => {
+    const aTable = a.tableNumber || "";
+    return aTable.toLowerCase().includes(`- ${groupName.toLowerCase()}`);
+  });
+
+  // Calculate unique tables in this specific group
+  const uniqueTablesInGroup = [
+    ...new Set(groupAttendees.map((a) => a.tableNumber)),
+  ];
+
+  // CRITICAL FIX: If we can't find any other tables, we check the event settings
+  // or default to a reasonable number to prevent immediate event ending.
+  const totalTablesInGroup =
+    uniqueTablesInGroup.length > 1
+      ? uniqueTablesInGroup.length
+      : event.maxRounds || 10; // Fallback to event setting if group detection fails
 
   // --- 3. MATH & STOP LOGIC ---
   const startTime = event.startTime.toDate();
   const secondsSinceStart = Math.floor((now - startTime) / 1000);
-  const prepBuffer = 60;
+  const prepBuffer = 60; // 1 minute buffer at the start before any rounds begin to allow people to find their tables and get settled
   const roundTimeSeconds = (event.roundTime || 7) * 60;
   const roundLengthPlusMove = roundTimeSeconds + prepBuffer;
 
   const isEventStarting = secondsSinceStart < prepBuffer;
   const secondsAfterPrep = secondsSinceStart - prepBuffer;
+
+  // Determine current round
   const currentRound = isEventStarting
     ? 1
     : Math.floor(secondsAfterPrep / roundLengthPlusMove) + 1;
 
-  // Total rounds is usually based on how many tables are in the group
+  // We use the total potential rounds to decide when the event is "Over"
   const totalPotentialRounds = totalTablesInGroup;
+
   const timeInCurrentBlock = isEventStarting
     ? 0
     : secondsAfterPrep % roundLengthPlusMove;
@@ -170,6 +195,15 @@ export default function LiveRoundView({ event, user, attendees }) {
     (isLastRound && timeInCurrentBlock >= roundTimeSeconds);
   const isMoving =
     !isEventStarting && !isEventOver && timeInCurrentBlock >= roundTimeSeconds;
+
+  // Reset local decision state for the new round
+  useEffect(() => {
+    if (!isEventOver) {
+      setDecisionMade(false);
+    }
+    setIsPriority(false); // Reset priority toggle for the new person
+    setOptionalNotes("");
+  }, [currentRound]);
 
   const secondsLeft = isEventStarting
     ? prepBuffer - secondsSinceStart
@@ -183,47 +217,68 @@ export default function LiveRoundView({ event, user, attendees }) {
   let activeNum = startTableNum;
   if (user.gender === "man") {
     // Man rotates: (Start + RoundOffset) % Total
-    activeNum = ((startTableNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
+    activeNum =
+      ((startTableNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
   }
 
-  const nextNum = user.gender === "man"
-    ? ((startTableNum + currentRound - 1) % totalTablesInGroup) + 1
-    : startTableNum;
+  const nextNum =
+    user.gender === "man"
+      ? ((startTableNum + currentRound - 1) % totalTablesInGroup) + 1
+      : startTableNum;
 
   // Re-construct the strings for the UI and Matching
   const activeRoundTable = `Table ${activeNum} - ${groupName}`;
-  const tableToShow = isMoving ? `Table ${nextNum} - ${groupName}` : activeRoundTable;
+  const tableToShow = isMoving
+    ? `Table ${nextNum} - ${groupName}`
+    : activeRoundTable;
 
   useEffect(() => {
     setDecisionMade(false);
   }, [currentRound]);
 
   // --- 5. PARTNER MATCHING ---
-  const partner = attendees.find((a) => {
-    if (a.gender === user.gender) return false;
+  const partnerId = attendees.find((a) => {
+    const attendeeUser = users.find((u) => u.id === a.userId);
+    // 1. Gender check
+    if (attendeeUser.gender === user.gender) return false;
 
-    // To find a match, we calculate the partner's CURRENT table string 
-    // and see if it matches the user's CURRENT table string.
-    const pTableString = a.tableNumber || "";
-    const [pTablePart, pGroup] = pTableString.split(" - ");
-    
-    // Safety check: Must be in the same group (YP, etc.)
-    if (pGroup !== groupName) return false;
+    // 2. Group check (Must be in same group: YP, YP, etc.)
+    const pTableString = a.tableNumber || ""; // tableNumber is in the registrations collection, so no need to look it up from users
+    if (!pTableString.toLowerCase().includes(`- ${groupName.toLowerCase()}`))
+      return false;
 
+    // 3. Table Calculation
+    const pTablePart = pTableString.split(" - ")[0] || "Table 1";
     const pStartNum = parseInt(pTablePart.replace("Table ", ""), 10) || 1;
     let pCurrentNum = pStartNum;
 
-    // If the partner is a man, he is rotating. If a woman, she is stationary.
-    if (a.gender === "man") {
-      pCurrentNum = ((pStartNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
+    // Rotation: Men move, Women stay
+    if (attendeeUser.gender === "man") {
+      pCurrentNum =
+        ((pStartNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
     }
 
-    const pCurrentTableFull = `Table ${pCurrentNum} - ${pGroup}`;
-    return pCurrentTableFull === activeRoundTable;
-  });
+    // 4. Comparison
+    // Check if their calculated number matches your active number
+    return pCurrentNum === activeNum;
+  }).userId;
+  console.log("Calculated partner ID:", partnerId);
+
+  const partner = users.find((u) => u.id === partnerId);
 
   // Check if this partner meets our criteria
-  const isMatch = partner ? checkCompatibility(user, partner) : false;
+  const isMatch = partner ? checkCompatibility(user, partner) : true;
+
+  console.log(
+    "Round " +
+      currentRound +
+      " | Active Table: " +
+      activeRoundTable +
+      " | Partner: " +
+      partner?.firstName +
+      " " +
+      partner?.lastName,
+  );
 
   // --- HANDLERS ---
   const handleInterestedSelection = (type) => {
@@ -232,66 +287,76 @@ export default function LiveRoundView({ event, user, attendees }) {
   };
 
   const saveInformationAndContinue = async () => {
-    if (tableAnswer !== String(tableToShow)) {
-      alert("Please enter the correct table number.");
+    // if (tableAnswer !== String(tableToShow)) {
+    //   alert("Please enter the correct table number.");
+    //   return;
+    // }
+    if (pendingSelection === "no") {
+      setDecisionMade(true); // Still mark as done so they see the "Move" screen
       return;
     }
 
     const myRef = doc(db, "users", user.id);
-    const newFeedbackEntry = {
+    const newEntry = {
       event: event.id,
       partnerId: partner.id,
-      partnerName: partner.name,
+      partnerName: `${partner.firstName} ${partner.lastName}`,
       interested: pendingSelection,
       priority: isPriority,
-      tableNumber: tableAnswer,
+      tableNumber: activeRoundTable,
       round: currentRound,
       optionalNotes: optionalNotes,
       timestamp: new Date(),
     };
 
     try {
-      let finalFeedbackData = [...(user.feedbackData || [])];
+      let updatePayload = {};
 
-      // If this is a new priority, we must find any OLD priority in this event and set it to false
       if (isPriority) {
-        finalFeedbackData = finalFeedbackData.map((f) =>
+        // If we are setting a NEW priority, we must map through the old data
+        // to ensure no one else in this event is marked as priority.
+        const cleanedFeedback = (user.feedbackData || []).map((f) =>
           f.event === event.id ? { ...f, priority: false } : f,
         );
+        updatePayload.feedbackData = [...cleanedFeedback, newEntry];
+      } else {
+        // If NOT a priority, use arrayUnion. This is "overwrite-proof."
+        // It tells Firestore: "Just add this one item to the existing list."
+        updatePayload.feedbackData = arrayUnion(newEntry);
       }
 
-      // Add the new entry
-      finalFeedbackData.push(newFeedbackEntry);
+      // Add legacy selections if needed
+      if (pendingSelection === "yes")
+        updatePayload.selections = arrayUnion(partner.id);
+      if (pendingSelection === "maybe")
+        updatePayload.maybeSelections = arrayUnion(partner.id);
+      if (emailInput) updatePayload.email = emailInput;
 
-      await updateDoc(myRef, {
-        feedbackData: finalFeedbackData,
-        // Keep your legacy arrays if still using them for other logic
-        ...(pendingSelection === "yes" && {
-          selections: arrayUnion(partner.id),
-        }),
-        ...(pendingSelection === "maybe" && {
-          maybeSelections: arrayUnion(partner.id),
-        }),
-        ...(emailInput && { email: emailInput }),
-      });
+      await updateDoc(myRef, updatePayload);
 
+      // Reset local UI states
       setDecisionMade(true);
-      setShowEmailModal(false);
+      setPendingSelection(null);
+      setOptionalNotes("");
+      setIsPriority(false);
     } catch (err) {
       console.error("Error saving feedback:", err);
+      alert("Check your internet connection; feedback didn't save.");
     }
   };
 
   // --- UI COMPONENTS ---
-
   // --- 4. THE RENDERER ---
   const renderMainContent = () => {
-    // A. GATEKEEPER: Not Fullscreen
-    if (!isFullscreen) {
+    // A. GATEKEEPER: Only show if it's the start phase AND they haven't clicked yet
+    if (isEventStarting && !isFullscreen && !hasStarted) {
       return (
         <div className="flex flex-col items-center justify-center p-10 text-center">
           <h1 className="text-4xl font-black mb-8">Ready to Start?</h1>
-          <button onClick={enterFullscreen} className="flex items-center gap-4 bg-blue-600 px-12 py-6 rounded-3xl text-3xl font-bold shadow-2xl active:scale-95 transition-transform">
+          <button
+            onClick={enterFullscreen}
+            className="flex items-center gap-4 bg-blue-600 px-12 py-6 rounded-3xl text-3xl font-bold shadow-2xl active:scale-95 transition-transform"
+          >
             <Maximize size={40} /> Enter Fullscreen
           </button>
         </div>
@@ -302,12 +367,23 @@ export default function LiveRoundView({ event, user, attendees }) {
     if (isEventOver) {
       return (
         <div className="flex flex-col items-center justify-center p-10 text-center">
-          {(decisionMade || !partner || !isMatch) ? (
-            <div className="animate-bounce text-center">
-              <PartyPopper size={100} className="text-yellow-400 mx-auto mb-4" />
-              <h1 className="text-6xl font-black">All Done!</h1>
+          {decisionMade || !partner || !isMatch ? (
+            <div className="text-center">
+              <div className="animate-bounce text-center">
+                <PartyPopper
+                  size={100}
+                  className="text-yellow-400 mx-auto mb-4"
+                />
+                <h1 className="text-6xl font-black">All Done!</h1>
+              </div>
+              <p className="text-2xl text-slate-400 mt-4">
+                Thanks for participating in this event. We hope you had a great
+                time and made some meaningful connections.
+              </p>
             </div>
-          ) : <FeedbackForm />}
+          ) : (
+            <FeedbackForm />
+          )}
         </div>
       );
     }
@@ -317,12 +393,16 @@ export default function LiveRoundView({ event, user, attendees }) {
       return (
         <div className="flex flex-col items-center justify-center p-10 text-center">
           <MapPin size={80} className="mb-6 animate-bounce text-white" />
-          <h1 className="text-5xl font-black mb-4 uppercase">Find Your Table</h1>
+          <h1 className="text-5xl font-black mb-4 uppercase">
+            Find Your Table
+          </h1>
           <div className="bg-white text-blue-700 rounded-3xl p-10 shadow-2xl">
             <p className="text-9xl font-black">{startTableNum}</p>
             <p className="text-xl font-bold mt-2">{groupName}</p>
           </div>
-          <p className="mt-10 text-xl font-medium">Starting in {secondsLeft}s</p>
+          <p className="mt-10 text-xl font-medium">
+            Starting in {secondsLeft}s
+          </p>
         </div>
       );
     }
@@ -340,10 +420,16 @@ export default function LiveRoundView({ event, user, attendees }) {
               <div className="bg-white text-slate-900 rounded-full w-64 h-64 flex flex-col items-center justify-center shadow-2xl mb-8 mx-auto border-12 border-blue-500">
                 <p className="text-9xl font-black leading-none">{nextNum}</p>
               </div>
-              <p className="text-xl font-bold text-slate-400 mb-4">{groupName}</p>
-              <p className="text-3xl font-mono text-blue-400">Next Round: {secondsLeft}s</p>
+              <p className="text-xl font-bold text-slate-400 mb-4">
+                {groupName}
+              </p>
+              <p className="text-3xl font-mono text-blue-400">
+                Next Round: {secondsLeft}s
+              </p>
             </>
-          ) : <FeedbackForm />}
+          ) : (
+            <FeedbackForm />
+          )}
         </div>
       );
     }
@@ -353,16 +439,22 @@ export default function LiveRoundView({ event, user, attendees }) {
       return (
         <div className="flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-700">
           <Coffee size={100} className="text-blue-400 mb-8 animate-pulse" />
-          <h2 className="text-6xl font-black mb-4 italic text-white">Break Time!</h2>
+          <h2 className="text-6xl font-black mb-4 italic text-white">
+            Break Time!
+          </h2>
           <p className="text-2xl text-slate-400 max-w-md leading-relaxed">
-            You don't have a match this round. Grab a drink, stretch, and get ready for the next one!
+            You don't have a match this round. Grab a drink, stretch, and get
+            ready for the next one!
           </p>
           <div className="mt-12 bg-slate-800 px-10 py-5 rounded-full border border-slate-700">
-             <p className="text-4xl font-mono font-bold text-blue-400">
-              {Math.floor(secondsLeft / 60)}:{(secondsLeft % 60).toString().padStart(2, "0")}
+            <p className="text-4xl font-mono font-bold text-blue-400">
+              {Math.floor(secondsLeft / 60)}:
+              {(secondsLeft % 60).toString().padStart(2, "0")}
             </p>
           </div>
-          <p className="mt-6 text-slate-500 font-bold uppercase tracking-widest">Table {activeNum}</p>
+          <p className="mt-6 text-slate-500 font-bold uppercase tracking-widest">
+            Table {activeNum}
+          </p>
         </div>
       );
     }
@@ -371,16 +463,24 @@ export default function LiveRoundView({ event, user, attendees }) {
     return (
       <div className="flex flex-col items-center justify-center p-6 text-center">
         <div className="mb-12">
-          <p className="text-blue-400 font-black uppercase text-sm mb-2">Round {currentRound} of {totalPotentialRounds}</p>
+          <p className="text-blue-400 font-black uppercase text-sm mb-2">
+            Round {currentRound} of {totalPotentialRounds}
+          </p>
           <div className="inline-block px-6 py-2 bg-slate-800 rounded-full border border-slate-700 text-xl font-bold">
-            Table {activeNum} <span className="text-slate-500 mx-2">|</span> {groupName}
+            Table {activeNum} <span className="text-slate-500 mx-2">|</span>{" "}
+            {groupName}
           </div>
         </div>
-        <p className="text-slate-500 uppercase font-bold mb-4 tracking-[0.3em]">Talking to</p>
-        <h2 className="text-8xl font-black mb-12 tracking-tighter">{partner.name}</h2>
+        <p className="text-slate-500 uppercase font-bold mb-4 tracking-[0.3em]">
+          Talking to
+        </p>
+        <h2 className="text-8xl font-black mb-12 tracking-tighter">
+          {partner?.firstName + " " + partner?.lastName}
+        </h2>
         <div className="bg-slate-800 px-16 py-8 rounded-[3rem] border-2 border-slate-700 shadow-2xl">
           <p className="text-7xl font-mono font-bold text-blue-400">
-            {Math.floor(secondsLeft / 60)}:{(secondsLeft % 60).toString().padStart(2, "0")}
+            {Math.floor(secondsLeft / 60)}:
+            {(secondsLeft % 60).toString().padStart(2, "0")}
           </p>
         </div>
       </div>
@@ -388,78 +488,147 @@ export default function LiveRoundView({ event, user, attendees }) {
   };
 
   const FeedbackForm = () => (
-  <div className="w-full max-w-xl text-center">
-    <h2 className="text-2xl font-bold mb-2 text-slate-300">
+    <div className="w-full max-w-xl text-center">
+      {/* <h2 className="text-2xl font-bold mb-2 text-slate-300">
       Quick check: What table are you at?
     </h2>
     <input
       type="text" // Changed to text as tableNumber is now "Table X - Group"
       className="w-full max-w-sm p-4 text-center border-2 border-slate-700 bg-slate-800 rounded-xl mb-8 text-2xl text-white font-black"
-      placeholder="e.g. Table 1 - YP"
+      placeholder="1"
       value={tableAnswer}
       onChange={(e) => setTableAnswer(e.target.value)}
-    />
+    /> */}
 
-    <h1 className="text-5xl font-black mb-12 text-white">
-      How was {partner?.name}?
-    </h1>
+      <h1 className="text-5xl font-black mb-12 text-white">
+        How was {partner?.firstName + " " + partner?.lastName}?
+      </h1>
 
-    <div className="flex flex-col gap-4">
-      {/* Interest Buttons */}
-      <button
-        onClick={() => setPendingSelection("yes")}
-        className={`py-6 rounded-2xl text-3xl font-black transition-colors ${pendingSelection === "yes" ? "bg-green-600 text-white" : "bg-white text-green-600"}`}
-      >
-        Interested
-      </button>
-
-      {pendingSelection === "yes" && (
+      <div className="flex flex-col gap-4">
+        {/* Interest Buttons */}
         <button
-          onClick={handlePriorityToggle}
-          className={`py-4 rounded-xl border-2 flex items-center justify-center gap-3 transition-all ${isPriority ? "bg-yellow-500 border-yellow-400 text-white" : "border-slate-600 text-slate-400"}`}
+          onClick={() => setPendingSelection("yes")}
+          className={`py-6 rounded-2xl text-3xl font-black transition-colors ${pendingSelection === "yes" ? "bg-green-600 text-white" : "bg-white text-green-600"}`}
         >
-          <Star fill={isPriority ? "white" : "none"} />{" "}
-          {isPriority ? "PRIORITY PICK" : "MAKE PRIORITY?"}
+          Interested
         </button>
-      )}
 
-      <button
-        onClick={() => setPendingSelection("maybe")}
-        className={`py-6 rounded-2xl text-3xl font-black transition-colors ${pendingSelection === "maybe" ? "bg-blue-600 text-white" : "bg-white text-blue-600"}`}
-      >
-        Maybe
-      </button>
+        {pendingSelection === "yes" && (
+          <button
+            onClick={handlePriorityToggle}
+            className={`py-4 rounded-xl border-2 flex items-center justify-center gap-3 transition-all ${isPriority ? "bg-yellow-500 border-yellow-400 text-white" : "border-slate-600 text-slate-400"}`}
+          >
+            <Star fill={isPriority ? "white" : "none"} />{" "}
+            {isPriority ? "PRIORITY PICK" : "MAKE PRIORITY?"}
+          </button>
+        )}
 
-      <button
-        onClick={() => setPendingSelection("no")}
-        className={`py-4 rounded-2xl text-xl font-bold transition-colors ${pendingSelection === "no" ? "bg-orange-900 text-orange-200" : "bg-slate-800 text-slate-400"}`}
-      >
-        No thanks
-      </button>
+        <button
+          onClick={() => setPendingSelection("maybe")}
+          className={`py-6 rounded-2xl text-3xl font-black transition-colors ${pendingSelection === "maybe" ? "bg-blue-600 text-white" : "bg-white text-blue-600"}`}
+        >
+          Maybe
+        </button>
 
-      {/* --- OPTIONAL NOTES AREA --- */}
-      <div className="mt-4 text-left">
-        <label className="text-xs font-bold uppercase text-slate-500 ml-2 mb-1 block tracking-widest">
-          Private Notes (Optional)
-        </label>
-        <textarea
-          className="w-full p-4 bg-slate-800 border-2 border-slate-700 rounded-2xl text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none transition-all"
-          rows={3}
-          placeholder="Anything you want to remember about this person..."
-          value={optionalNotes}
-          onChange={(e) => setOptionalNotes(e.target.value)}
-        />
+        <button
+          onClick={() => setPendingSelection("no")}
+          className={`py-4 rounded-2xl text-xl font-bold transition-colors ${pendingSelection === "no" ? "bg-orange-900 text-orange-200" : "bg-slate-800 text-slate-400"}`}
+        >
+          No thanks
+        </button>
+
+        {/* --- OPTIONAL NOTES AREA --- */}
+        <div className="mt-4 text-left">
+          <label className="text-xs font-bold uppercase text-slate-500 ml-2 mb-1 block tracking-widest">
+            Private Notes (Optional)
+          </label>
+          <textarea
+            className="w-full p-4 bg-slate-800 border-2 border-slate-700 rounded-2xl text-white placeholder-slate-500 focus:border-blue-500 outline-none resize-none transition-all"
+            rows={3}
+            placeholder="Anything you want to remember about this person..."
+            value={optionalNotes}
+            onChange={(e) => setOptionalNotes(e.target.value)}
+          />
+        </div>
+
+        <button
+          onClick={saveInformationAndContinue}
+          disabled={!pendingSelection}
+          className={`mt-8 py-5 rounded-2xl font-black text-2xl transition-all ${!pendingSelection ? "bg-slate-700 text-slate-500 cursor-not-allowed" : "bg-blue-600 text-white shadow-lg shadow-blue-900/20"}`}
+        >
+          Submit Selection
+        </button>
       </div>
+    </div>
+  );
 
+  const DebugOverlay = () => (
+    <div className="fixed bottom-4 right-4 z-9999 flex flex-col items-end gap-2">
+      {showDebug && (
+        <div className="bg-black/90 border border-slate-700 p-4 rounded-2xl text-[10px] font-mono text-green-400 shadow-2xl w-64 backdrop-blur-md">
+          <h3 className="font-bold border-b border-slate-800 pb-1 mb-2 text-white uppercase tracking-widest text-[8px]">
+            System Diagnostics
+          </h3>
+          <p>
+            <span className="text-slate-500">User Name:</span> {user.firstName}{" "}
+            {user.lastName}
+          </p>
+          <p>
+            <span className="text-slate-500">My Group:</span> {groupName}
+          </p>
+          <p>
+            <span className="text-slate-500">Total Tables:</span>{" "}
+            {totalTablesInGroup}
+          </p>
+          <p>
+            <span className="text-slate-500">Current Round:</span>{" "}
+            {currentRound} / {totalPotentialRounds}
+          </p>
+          <p>
+            <span className="text-slate-500">Time State:</span>{" "}
+            {isEventStarting
+              ? "PREP"
+              : isMoving
+                ? "MOVING"
+                : isEventOver
+                  ? "OVER"
+                  : "ACTIVE"}
+          </p>
+          <p>
+            <span className="text-slate-500">Sec Left:</span> {secondsLeft}s
+          </p>
+          <hr className="my-2 border-slate-800" />
+          <p>
+            <span className="text-slate-500">My Start Pos:</span>{" "}
+            {startTableNum}
+          </p>
+          <p>
+            <span className="text-slate-500">My Current Table:</span>{" "}
+            {activeNum}
+          </p>
+          <hr className="my-2 border-slate-800" />
+          <p>
+            <span className="text-slate-500">Partner Found:</span>{" "}
+            {partner ? partner.firstName + " " + partner.lastName : "❌ NONE"}
+          </p>
+          <p>
+            <span className="text-slate-500">Compatibility:</span>{" "}
+            {isMatch ? "✅ PASS" : "⚠️ FAIL/NONE"}
+          </p>
+          <p>
+            <span className="text-slate-500">Decision:</span>{" "}
+            {decisionMade ? "DONE" : "PENDING"}
+          </p>
+        </div>
+      )}
       <button
-        onClick={saveInformationAndContinue}
-        disabled={!pendingSelection}
-        className={`mt-8 py-5 rounded-2xl font-black text-2xl transition-all ${!pendingSelection ? "bg-slate-700 text-slate-500 cursor-not-allowed" : "bg-blue-600 text-white shadow-lg shadow-blue-900/20"}`}
+        onClick={() => setShowDebug(!showDebug)}
+        className="bg-slate-800/50 hover:bg-slate-700 p-2 rounded-full text-slate-500 transition-colors"
+        title="Toggle Debug"
       >
-        Submit Selection
+        <AlertCircle size={16} />
       </button>
     </div>
-  </div>
   );
 
   // --- FINAL RETURN: THE SHELL ---
@@ -469,6 +638,17 @@ export default function LiveRoundView({ event, user, attendees }) {
       className="min-h-screen bg-slate-900 text-white flex flex-col justify-center items-center overflow-hidden"
     >
       {renderMainContent()}
+
+      {/* SUBTLE FULLSCREEN RESTORE BUTTON (Bottom-Left) */}
+      {hasStarted && !isFullscreen && (
+        <button
+          onClick={enterFullscreen}
+          className="fixed bottom-6 left-6 p-4 bg-slate-800/80 hover:bg-slate-700 text-slate-400 rounded-full border border-slate-700 shadow-xl transition-all z-50 animate-in fade-in slide-in-from-bottom-4"
+          title="Restore Fullscreen"
+        >
+          <Maximize size={24} />
+        </button>
+      )}
 
       {/* GLOBAL MODALS */}
       {showPriorityConfirm && (
@@ -480,7 +660,7 @@ export default function LiveRoundView({ event, user, attendees }) {
             </h2>
             <p className="text-slate-400 mb-8">
               You already prioritized {existingPriorityMatch?.partnerName}.
-              Switch to {partner?.name}?
+              Switch to {partner?.firstName + " " + partner?.lastName}?
             </p>
             <button
               onClick={() => {
@@ -500,6 +680,7 @@ export default function LiveRoundView({ event, user, attendees }) {
           </div>
         </div>
       )}
+      {debugging && <DebugOverlay />}
     </div>
   );
 }

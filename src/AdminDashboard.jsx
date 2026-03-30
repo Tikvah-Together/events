@@ -210,7 +210,7 @@ export default function AdminDashboard() {
         launchEvent();
       } else {
         // If deactivating, set all attendees to not checked in
-        setAttendeesNotCheckedIn(id);
+        //setAttendeesNotCheckedIn(id);
       }
 
       // 2. Update the Main Detail View immediately

@@ -78,7 +78,7 @@ export default function Gatekeeper() {
     const unsubscribe = onSnapshot(q, (snap) => {
       const docs = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((u) => u.checkedIn);
+        .filter((u) => u.checkedIn);// make sure to only pull checked-in attendees
       setAttendees(docs);
 
       if (myProfile) {
@@ -482,6 +482,7 @@ export default function Gatekeeper() {
       event={currentEvent}
       user={myProfile}
       attendees={attendees}
+      users={masterUsers}
     />
   );
 }
