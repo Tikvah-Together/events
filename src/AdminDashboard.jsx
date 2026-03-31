@@ -24,6 +24,7 @@ import {
   Square,
   UserMinus,
   ChevronDown,
+  Pause,
 } from "lucide-react";
 
 export default function AdminDashboard() {
@@ -242,6 +243,48 @@ export default function AdminDashboard() {
     );
     await Promise.all(resetPromises);
   };
+
+const togglePause = async (currentEvent) => {
+  // 1. Safety Check: Ensure the event object and its ID exist
+  if (!currentEvent || !currentEvent.id) {
+    console.error("No event ID found. Cannot toggle pause.");
+    return;
+  }
+
+  const eventRef = doc(db, "events", currentEvent.id);
+  const now = new Date();
+
+  try {
+    if (currentEvent.isPaused) {
+      // --- RESUMING ---
+      // Check if we have a valid pausedAt timestamp
+      const pauseStart = currentEvent.pausedAt?.toDate?.() || currentEvent.pausedAt;
+      
+      if (!pauseStart) {
+        console.error("Resume failed: No pause timestamp found.");
+        return;
+      }
+
+      const pauseDurationMs = now.getTime() - new Date(pauseStart).getTime();
+      const oldStartTime = currentEvent.startTime?.toDate?.() || currentEvent.startTime;
+      const newStartTime = new Date(new Date(oldStartTime).getTime() + pauseDurationMs);
+
+      await updateDoc(eventRef, {
+        isPaused: false,
+        startTime: newStartTime,
+        pausedAt: null,
+      });
+    } else {
+      // --- PAUSING ---
+      await updateDoc(eventRef, {
+        isPaused: true,
+        pausedAt: now,
+      });
+    }
+  } catch (err) {
+    console.error("Error toggling pause state:", err);
+  }
+};
 
   const launchEvent = async () => {
     const men = attendees.filter((a) => a.gender === "man" && a.checkedIn);
@@ -1016,6 +1059,19 @@ export default function AdminDashboard() {
                           <>
                             <Play size={16} fill="currentColor" /> Launch Event
                           </>
+                        )}
+                      </button>
+                      <button onClick={() => togglePause(selectedEvent, selectedEvent.isPaused)}
+                       className={`px-6 py-2 rounded-md font-bold flex items-center gap-2 transition-all duration-200 shadow-sm border
+                         ${
+                        selectedEvent.isPaused
+                          ? "bg-green-600 text-white border-green-600 hover:bg-green-700"
+                          : "bg-slate-200 text-slate-600 border-slate-200 hover:bg-slate-300"
+                           }`} disabled={!selectedEvent.active}>
+                              {selectedEvent.isPaused ? (
+                          <> <Play size={16} fill="currentColor" /> Resume </>
+                        ) : (
+                          <> <Pause size={16} fill="currentColor" /> Pause </>
                         )}
                       </button>
 
@@ -1939,7 +1995,7 @@ export default function AdminDashboard() {
                                   </select>
                                 </td>
 
-                                {/* Open to Marital (Array Edit) */}
+                                {/* Anything Else */}
                                 <td className="px-6 py-4 text-slate-400 italic text-[11px]">
                                   <textarea
                                     className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"

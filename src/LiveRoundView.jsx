@@ -169,7 +169,10 @@ export default function LiveRoundView({ event, user, attendees, users }) {
 
   // --- 3. MATH & STOP LOGIC ---
   const startTime = event.startTime.toDate();
-  const secondsSinceStart = Math.floor((now - startTime) / 1000);
+  // If paused, we calculate time based on when the pause started
+// If not paused, we use the current time (now)
+  const effectiveNow = event.isPaused ? event.pausedAt.toDate() : now;
+  const secondsSinceStart = Math.floor((effectiveNow - startTime) / 1000);
   const prepBuffer = 60; // 1 minute buffer at the start before any rounds begin to allow people to find their tables and get settled
   const roundTimeSeconds = (event.roundTime || 7) * 60;
   const roundLengthPlusMove = roundTimeSeconds + prepBuffer;
@@ -236,35 +239,40 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     setDecisionMade(false);
   }, [currentRound]);
 
-  // --- 5. PARTNER MATCHING ---
-  const partnerId = attendees.find((a) => {
-    const attendeeUser = users.find((u) => u.id === a.userId);
-    // 1. Gender check
-    if (attendeeUser.gender === user.gender) return false;
+// --- 5. PARTNER MATCHING ---
+const matchedAttendee = attendees.find((a) => {
+  const attendeeUser = users.find((u) => u.id === a.userId);
+  
+  // Safety check: If for some reason the user ID in attendees 
+  // doesn't exist in the master users list, skip them.
+  if (!attendeeUser) return false;
 
-    // 2. Group check (Must be in same group: YP, YP, etc.)
-    const pTableString = a.tableNumber || ""; // tableNumber is in the registrations collection, so no need to look it up from users
-    if (!pTableString.toLowerCase().includes(`- ${groupName.toLowerCase()}`))
-      return false;
+  // 1. Gender check
+  if (attendeeUser.gender === user.gender) return false;
 
-    // 3. Table Calculation
-    const pTablePart = pTableString.split(" - ")[0] || "Table 1";
-    const pStartNum = parseInt(pTablePart.replace("Table ", ""), 10) || 1;
-    let pCurrentNum = pStartNum;
+  // 2. Group check
+  const pTableString = a.tableNumber || "";
+  if (!pTableString.toLowerCase().includes(`- ${groupName.toLowerCase()}`))
+    return false;
 
-    // Rotation: Men move, Women stay
-    if (attendeeUser.gender === "man") {
-      pCurrentNum =
-        ((pStartNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
-    }
+  // 3. Table Calculation
+  const pTablePart = pTableString.split(" - ")[0] || "Table 1";
+  const pStartNum = parseInt(pTablePart.replace("Table ", ""), 10) || 1;
+  let pCurrentNum = pStartNum;
 
-    // 4. Comparison
-    // Check if their calculated number matches your active number
-    return pCurrentNum === activeNum;
-  }).userId;
-  console.log("Calculated partner ID:", partnerId);
+  if (attendeeUser.gender === "man") {
+    pCurrentNum = ((pStartNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
+  }
 
-  const partner = users.find((u) => u.id === partnerId);
+  // 4. Comparison
+  return pCurrentNum === activeNum;
+});
+
+// Use optional chaining so partnerId is simply undefined if no match is found
+const partnerId = matchedAttendee?.userId; 
+console.log("Calculated partner ID:", partnerId);
+
+const partner = partnerId ? users.find((u) => u.id === partnerId) : null;
 
   // Check if this partner meets our criteria
   const isMatch = partner ? checkCompatibility(user, partner) : true;
@@ -433,6 +441,24 @@ export default function LiveRoundView({ event, user, attendees, users }) {
         </div>
       );
     }
+
+    if (event.isPaused) {
+  return (
+    <div className="flex flex-col items-center justify-center p-10 text-center">
+      <div className="relative">
+        <Coffee size={120} className="text-yellow-500 mb-8 animate-bounce" />
+        <div className="absolute top-0 right-0 bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold">
+          PAUSED
+        </div>
+      </div>
+      <h1 className="text-5xl font-black mb-4">Event Paused</h1>
+      <p className="text-2xl text-slate-400">
+        The organizer has temporarily paused the event. <br />
+        Grab a drink—we'll be back shortly!
+      </p>
+    </div>
+  );
+}
 
     // E. ACTIVE DATING OR BREAK PHASE
     if (!partner || !isMatch) {
