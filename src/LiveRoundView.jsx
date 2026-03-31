@@ -299,59 +299,74 @@ const partner = partnerId ? users.find((u) => u.id === partnerId) : null;
     //   alert("Please enter the correct table number.");
     //   return;
     // }
-    if (pendingSelection === "no") {
-      setDecisionMade(true); // Still mark as done so they see the "Move" screen
-      return;
-    }
+  if (pendingSelection === "no") {
+    setDecisionMade(true);
+    return;
+  }
 
-    const myRef = doc(db, "users", user.id);
-    const newEntry = {
-      event: event.id,
-      partnerId: partner.id,
-      partnerName: `${partner.firstName} ${partner.lastName}`,
-      interested: pendingSelection,
-      priority: isPriority,
-      tableNumber: activeRoundTable,
-      round: currentRound,
-      optionalNotes: optionalNotes,
-      timestamp: new Date(),
-    };
-
-    try {
-      let updatePayload = {};
-
-      if (isPriority) {
-        // If we are setting a NEW priority, we must map through the old data
-        // to ensure no one else in this event is marked as priority.
-        const cleanedFeedback = (user.feedbackData || []).map((f) =>
-          f.event === event.id ? { ...f, priority: false } : f,
-        );
-        updatePayload.feedbackData = [...cleanedFeedback, newEntry];
-      } else {
-        // If NOT a priority, use arrayUnion. This is "overwrite-proof."
-        // It tells Firestore: "Just add this one item to the existing list."
-        updatePayload.feedbackData = arrayUnion(newEntry);
-      }
-
-      // Add legacy selections if needed
-      if (pendingSelection === "yes")
-        updatePayload.selections = arrayUnion(partner.id);
-      if (pendingSelection === "maybe")
-        updatePayload.maybeSelections = arrayUnion(partner.id);
-      if (emailInput) updatePayload.email = emailInput;
-
-      await updateDoc(myRef, updatePayload);
-
-      // Reset local UI states
-      setDecisionMade(true);
-      setPendingSelection(null);
-      setOptionalNotes("");
-      setIsPriority(false);
-    } catch (err) {
-      console.error("Error saving feedback:", err);
-      alert("Check your internet connection; feedback didn't save.");
-    }
+  const myRef = doc(db, "users", user.id);
+  const newEntry = {
+    event: event.id,
+    partnerId: partner.id,
+    partnerName: `${partner.firstName} ${partner.lastName}`,
+    interested: pendingSelection,
+    isPriority: isPriority,
+    tableNumber: activeRoundTable,
+    round: currentRound,
+    optionalNotes: optionalNotes,
+    timestamp: new Date(),
   };
+
+  try {
+    // 1. Get existing feedback or default to empty array
+    let currentFeedback = user.feedbackData || [];
+
+    // 2. Clear existing priority for this event if the new entry is priority
+    if (isPriority) {
+      currentFeedback = currentFeedback.map((f) =>
+        f.event === event.id ? { ...f, priority: false } : f
+      );
+    }
+
+    // 3. Find if an entry for this partner already exists in this event
+    const existingIndex = currentFeedback.findIndex(
+      (f) => f.event === event.id && f.partnerId === partner.id
+    );
+
+    let finalFeedback;
+    if (existingIndex > -1) {
+      // UPDATE: Replace the existing entry with the new one
+      finalFeedback = [...currentFeedback];
+      finalFeedback[existingIndex] = newEntry;
+    } else {
+      // ADD: Append the new entry
+      finalFeedback = [...currentFeedback, newEntry];
+    }
+
+    // 4. Prepare the payload
+    const updatePayload = {
+      feedbackData: finalFeedback
+    };
+    
+      // if (pendingSelection === "yes")
+      //   updatePayload.selections = arrayUnion(partner.id);
+      // if (pendingSelection === "maybe")
+      //   updatePayload.maybeSelections = arrayUnion(partner.id);
+    if (emailInput) updatePayload.email = emailInput;
+
+    // 5. Save to Firestore
+    await updateDoc(myRef, updatePayload);
+
+    // Reset local UI states
+    setDecisionMade(true);
+    setPendingSelection(null);
+    setOptionalNotes("");
+    setIsPriority(false);
+  } catch (err) {
+    console.error("Error saving feedback:", err);
+    alert("Check your internet connection; feedback didn't save.");
+  }
+};
 
   // --- UI COMPONENTS ---
   // --- 4. THE RENDERER ---

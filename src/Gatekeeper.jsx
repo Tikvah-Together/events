@@ -9,6 +9,7 @@ import {
   updateDoc,
   orderBy,
   limit,
+  arrayUnion,
 } from "firebase/firestore";
 import LiveRoundView from "./LiveRoundView";
 import {
@@ -36,6 +37,7 @@ export default function Gatekeeper() {
   const [manualEntry, setManualEntry] = useState({
     partnerId: "",
     interest: "yes",
+    optionalNotes: "",
     round: 1,
   });
   // Login State
@@ -78,7 +80,7 @@ export default function Gatekeeper() {
     const unsubscribe = onSnapshot(q, (snap) => {
       const docs = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((u) => u.checkedIn);// make sure to only pull checked-in attendees
+        .filter((u) => u.checkedIn); // make sure to only pull checked-in attendees
       setAttendees(docs);
 
       if (myProfile) {
@@ -138,10 +140,26 @@ export default function Gatekeeper() {
 
     try {
       const userRef = doc(db, "users", adminTargetUser.id);
+      if (manualEntry.isPriority) {// need to make all other entries for this user non-priority if this one is marked as priority
+        const existingFeedback = userRef.feedbackData || [];
+        const updatedFeedback = existingFeedback.map((entry) => ({
+          ...entry,
+          isPriority: false, // reset all to non-priority
+        }));
+        await updateDoc(userRef, { feedbackData: updatedFeedback });
+      }
       await updateDoc(userRef, {
         feedbackData: arrayUnion({
+          event: selectedEventId,
+          partnerName:
+            masterUsers.find((u) => u.id === manualEntry.partnerId)?.firstName +
+              " " +
+              masterUsers.find((u) => u.id === manualEntry.partnerId)
+                ?.lastName || "Unknown",
           partnerId: manualEntry.partnerId,
           interested: manualEntry.interest,
+          isPriority: manualEntry.isPriority || false,
+          optionalNotes: manualEntry.optionalNotes || "",
           round: manualEntry.round,
           tableNumber: "Admin Entry",
           timestamp: new Date(),
@@ -301,8 +319,32 @@ export default function Gatekeeper() {
                   </div>
                 </div>
 
+                {/* PRIORITY TOGGLE */}
+                {manualEntry.interest === "yes" && (
+                  <div className="mt-4">
+                    <button
+                      onClick={() =>
+                        setManualEntry({
+                          ...manualEntry,
+                          isPriority: !manualEntry.isPriority,
+                        })
+                      }
+                      className={`w-full py-2 rounded-xl font-bold border-2 transition-all flex items-center justify-center gap-2 ${
+                        manualEntry.isPriority
+                          ? "border-amber-500 bg-amber-50 text-amber-600"
+                          : "border-slate-100 text-slate-400"
+                      }`}
+                    >
+                      <span>⭐</span>
+                      {manualEntry.isPriority
+                        ? "Priority Selection"
+                        : "Mark as Priority?"}
+                    </button>
+                  </div>
+                )}
+
                 {/* ADDITIONAL NOTES */}
-                <div>
+                <div className="mt-4">
                   <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
                     Additional Notes
                   </label>
@@ -343,7 +385,9 @@ export default function Gatekeeper() {
     );
   }
 
-  { /* IDENTITY SELECTION MODAL */ }
+  {
+    /* IDENTITY SELECTION MODAL */
+  }
   if (potentialMatches.length > 1) {
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
