@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { db } from "./firebase";
 import {
   collection,
@@ -172,6 +172,78 @@ export default function Gatekeeper() {
     }
   };
 
+const tableGrid = useMemo(() => {
+  // Helper to extract ONLY numbers from a string (e.g., "Table 5" becomes 5)
+  const getOnlyNumber = (val) => {
+    if (!val) return 0;
+    const cleaned = String(val).replace(/\D/g, ""); // Remove everything that isn't a digit
+    return parseInt(cleaned) || 0;
+  };
+
+  const checkedInUsers = masterUsers.filter((u) =>
+    attendees.some((reg) => reg.userId === u.id)
+  );
+
+  // 1. Find the highest table number found in the registrations
+  const maxTableFound = Math.max(
+    ...attendees.map((a) => getOnlyNumber(a.tableNumber)),
+    0
+  );
+
+  // 2. Set a minimum grid size (e.g., at least 6 tables) so it looks like a room
+  const totalTables = Math.max(maxTableFound, 6); 
+
+  const girlsRow = Array(totalTables).fill(null);
+  const boysRow = Array(totalTables).fill(null);
+
+  checkedInUsers.forEach((user) => {
+    const reg = attendees.find((r) => r.userId === user.id);
+    const tableNum = getOnlyNumber(reg?.tableNumber);
+    
+    // tableNum 1 goes into Index 0
+    const tableIdx = tableNum - 1;
+
+    if (tableIdx >= 0) {
+      if (user.gender === "man") {
+        boysRow[tableIdx] = { ...user, registration: reg };
+      } else {
+        girlsRow[tableIdx] = { ...user, registration: reg };
+      }
+    }
+  });
+
+  return { girlsRow, boysRow, tableCount: totalTables };
+}, [masterUsers, attendees]);
+
+  // Helper to render a table square
+  const TableSquare = ({ person, tableNum, colorClass }) => (
+    <div 
+      onClick={() => person && setAdminTargetUser(person)}
+      className={`relative h-24 w-full border-2 rounded-xl flex flex-col items-center justify-center p-2 transition-all cursor-pointer
+        ${person 
+          ? `${colorClass} border-transparent shadow-sm hover:scale-105` 
+          : "border-dashed border-slate-200 bg-white opacity-40"}`}
+    >
+      <span className="absolute top-1 left-2 text-[10px] font-black opacity-30">
+        T-{tableNum}
+      </span>
+      {person ? (
+        <>
+          <p className="text-xs font-bold text-center leading-tight">
+            {person.firstName}
+          </p>
+          <div className="mt-1 flex gap-1">
+             {person.feedbackData?.length > 0 && (
+               <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+             )}
+          </div>
+        </>
+      ) : (
+        <span className="text-[10px] text-slate-300 font-bold uppercase">Empty</span>
+      )}
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
@@ -185,25 +257,57 @@ export default function Gatekeeper() {
   if (viewMode === "admin") {
     return (
       <div className="min-h-screen bg-slate-50 p-6">
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="flex justify-between items-center mb-8">
             <div>
-              <h1 className="text-2xl font-black text-slate-900 uppercase">
-                Event Control Room
-              </h1>
-              <p className="text-slate-500">
-                {currentEvent?.name} • {attendees.length} Checked In
-              </p>
+              <h1 className="text-2xl font-black text-slate-900 uppercase">Control Room</h1>
+              <p className="text-slate-500">{currentEvent?.name} • {attendees.length} Checked In</p>
             </div>
             <button
               onClick={() => setViewMode("user")}
-              className="bg-slate-200 px-4 py-2 rounded-lg font-bold text-sm"
+              className="bg-slate-900 text-white px-6 py-2 rounded-full font-bold text-sm"
             >
-              Switch to User View
+              User View
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-12">
+            {/* GIRLS ROW */}
+            <section>
+              <h2 className="text-xs font-black text-pink-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <span className="w-8 h-px bg-pink-200" /> Women's Row
+              </h2>
+              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
+                {tableGrid.girlsRow.map((person, idx) => (
+                  <TableSquare 
+                    key={`girl-${idx}`} 
+                    person={person} 
+                    tableNum={idx + 1} 
+                    colorClass="bg-pink-100 text-pink-700"
+                  />
+                ))}
+              </div>
+            </section>
+
+            {/* BOYS ROW */}
+            <section>
+              <h2 className="text-xs font-black text-blue-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <span className="w-8 h-px bg-blue-200" /> Men's Row
+              </h2>
+              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
+                {tableGrid.boysRow.map((person, idx) => (
+                  <TableSquare 
+                    key={`boy-${idx}`} 
+                    person={person} 
+                    tableNum={idx + 1} 
+                    colorClass="bg-blue-100 text-blue-700"
+                  />
+                ))}
+              </div>
+            </section>
+          </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {masterUsers
               .filter((u) => attendees.some((reg) => reg.userId === u.id))
               .map((user) => {
@@ -252,7 +356,7 @@ export default function Gatekeeper() {
                 );
               })}
           </div>
-        </div>
+      </div>
 
         {/* MANUAL ENTRY MODAL */}
         {adminTargetUser && (
@@ -385,9 +489,7 @@ export default function Gatekeeper() {
     );
   }
 
-  {
-    /* IDENTITY SELECTION MODAL */
-  }
+  {/* IDENTITY SELECTION MODAL */}
   if (potentialMatches.length > 1) {
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">

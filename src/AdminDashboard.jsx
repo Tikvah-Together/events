@@ -1,4 +1,4 @@
-import { useState, useEffect, act } from "react";
+import { useState, useEffect, act, useMemo } from "react";
 import { db } from "./firebase";
 import {
   collection,
@@ -175,7 +175,13 @@ export default function AdminDashboard() {
 
     // 3. Advanced Filters
     if (filters.gender !== "all" && a.gender !== filters.gender) return false;
-    if (filters.ethnicity !== "all" && a.ethnicity !== filters.ethnicity)
+    if (
+      filters.ethnicity !== "all" &&
+      !(
+        a.ethnicity &&
+        a.ethnicity.toLowerCase().includes(filters.ethnicity.toLowerCase())
+      )
+    )
       return false;
     if (
       filters.maritalStatus !== "all" &&
@@ -726,6 +732,46 @@ export default function AdminDashboard() {
     }
   };
 
+  const stats = useMemo(() => {
+    const getListStats = (list) => {
+      const boys = list.filter((u) =>
+        ["male", "boy", "man"].includes(u.gender?.toLowerCase()),
+      ).length;
+      const girls = list.filter((u) =>
+        ["female", "girl", "woman"].includes(u.gender?.toLowerCase()),
+      ).length;
+      const total = boys + girls;
+      const ratio =
+        total > 0
+          ? {
+              b: Math.round((boys / total) * 100),
+              g: Math.round((girls / total) * 100),
+            }
+          : { b: 0, g: 0 };
+      return { boys, girls, total, ratio };
+    };
+
+    // Overall stats for the current tab
+    const currentList =
+      activeTab === "master" ? filteredMasterList : filteredAttendees;
+    const overall = getListStats(currentList);
+
+    // Stats per group (for the Events tab)
+    const groupStats = {};
+    if (activeTab === "events") {
+      filteredAttendees.forEach((u) => {
+        const gId = u.groupId || "Unassigned";
+        if (!groupStats[gId]) groupStats[gId] = [];
+        groupStats[gId].push(u);
+      });
+      Object.keys(groupStats).forEach((key) => {
+        groupStats[key] = getListStats(groupStats[key]);
+      });
+    }
+
+    return { overall, groupStats };
+  }, [filteredMasterList, filteredAttendees, activeTab]);
+
   return (
     <div className="flex flex-col bg-slate-50">
       {/* TAB NAVIGATION */}
@@ -1270,7 +1316,7 @@ export default function AdminDashboard() {
                         </select>
                       </div>
 
-                      {/* Ethnicity */}
+                      {/* Ethnicity Filter */}
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
                           Ethnicity
@@ -1286,13 +1332,19 @@ export default function AdminDashboard() {
                           }
                         >
                           <option value="all">Any</option>
-                          <option value="Syrian / Egyptian / Lebanese">
-                            S/E/L
-                          </option>
-                          <option value="Other Sephardic">
-                            Other Sephardic
-                          </option>
+                          <optgroup label="Sephardic">
+                            <option value="Syrian">Syrian</option>
+                            <option value="Egyptian">Egyptian</option>
+                            <option value="Lebanese">Lebanese</option>
+                            <option value="Persian">Persian</option>
+                            <option value="Moroccan">Moroccan</option>
+                            <option value="Israeli">Israeli</option>
+                            <option value="Other Sephardic">
+                              Other Sephardic
+                            </option>
+                          </optgroup>
                           <option value="Ashkenaz">Ashkenaz</option>
+                          <option value="Other">Other</option>
                         </select>
                       </div>
 
@@ -1422,6 +1474,27 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* STATISTICS SUMMARY BAR */}
+                <div className="flex gap-4 mb-4">
+                  <div className="bg-white px-6 py-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-6">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {activeTab === "master" ? "Total List" : "Event Total"}
+                    </span>
+                    <div className="flex gap-4 text-sm font-bold">
+                      <span className="text-blue-600">
+                        Boys: {stats.overall.boys}
+                      </span>
+                      <span className="text-pink-600">
+                        Girls: {stats.overall.girls}
+                      </span>
+                      <span className="text-slate-600">
+                        Ratio: {stats.overall.ratio.b}% /{" "}
+                        {stats.overall.ratio.g}%
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 {/* TABLE SECTION */}
@@ -1567,13 +1640,32 @@ export default function AdminDashboard() {
                             }
                           });
 
-                          // Apply sorting (By Name for Master, By Group for Events)
+                          // Apply multi-level sorting (Gender first, then Age)
                           const sortedList = [...listToDisplay].sort((a, b) => {
-                            if (activeTab === "events") {
-                              return (a.groupId || "").localeCompare(
-                                b.groupId || "",
-                              );
+                            // 1. Sort by Gender (Male/Boys first)
+                            const genderA = (a.gender || "").toLowerCase();
+                            const genderB = (b.gender || "").toLowerCase();
+
+                            if (genderA !== genderB) {
+                              // We treat "male" or "boy" as -1 to put them at the top
+                              const isAMale =
+                                genderA === "male" || genderA === "boy";
+                              const isBMale =
+                                genderB === "male" || genderB === "boy";
+
+                              if (isAMale && !isBMale) return -1;
+                              if (!isAMale && isBMale) return 1;
                             }
+
+                            // 2. If genders are the same, sort by Age (Youngest to Oldest)
+                            const ageA = parseInt(a.age) || 999; // Default high age if missing
+                            const ageB = parseInt(b.age) || 999;
+
+                            if (ageA !== ageB) {
+                              return ageA - ageB;
+                            }
+
+                            // 3. Optional: Final fallback to Name so the list is stable
                             return (a.firstName || "").localeCompare(
                               b.firstName || "",
                             );
@@ -1592,6 +1684,57 @@ export default function AdminDashboard() {
                               // Compare against the previous item in the SORTED list, not filteredAttendees
                               isNewGroup =
                                 a.groupId !== sortedList[index - 1].groupId;
+                            }
+
+                            {
+                              activeTab === "events" &&
+                                (isNewGroup || index === 0) && (
+                                  <tr className="bg-slate-100/50">
+                                    <td
+                                      colSpan="100%"
+                                      className="px-6 py-2 border-y border-slate-200"
+                                    >
+                                      <div className="flex justify-between items-center">
+                                        <span className="font-black text-slate-700 uppercase text-[11px]">
+                                          Group: {a.groupId || "Unassigned"}
+                                        </span>
+                                        <div className="flex gap-4 text-[11px] font-bold">
+                                          <span className="text-blue-700">
+                                            Boys:{" "}
+                                            {
+                                              stats.groupStats[
+                                                a.groupId || "Unassigned"
+                                              ]?.boys
+                                            }
+                                          </span>
+                                          <span className="text-pink-700">
+                                            Girls:{" "}
+                                            {
+                                              stats.groupStats[
+                                                a.groupId || "Unassigned"
+                                              ]?.girls
+                                            }
+                                          </span>
+                                          <span className="text-slate-500">
+                                            Ratio:{" "}
+                                            {
+                                              stats.groupStats[
+                                                a.groupId || "Unassigned"
+                                              ]?.ratio.b
+                                            }
+                                            % /{" "}
+                                            {
+                                              stats.groupStats[
+                                                a.groupId || "Unassigned"
+                                              ]?.ratio.g
+                                            }
+                                            %
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
                             }
 
                             return (
@@ -1866,11 +2009,12 @@ export default function AdminDashboard() {
                                   </td>
                                 )}
 
-                                {/* Ethnicity */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.ethnicity}
+                                {/* Ethnicity Table Cell */}
+                                <td className="px-6 py-4 text-xs text-slate-600">
+                                  <input
+                                    type="text"
+                                    className="bg-transparent hover:bg-slate-100 border-none outline-none w-full min-w-25 focus:ring-1 focus:ring-blue-400 rounded p-1 transition-all"
+                                    value={a.ethnicity || ""}
                                     onChange={(e) =>
                                       updateAttendeeField(
                                         a,
@@ -1878,16 +2022,7 @@ export default function AdminDashboard() {
                                         e.target.value,
                                       )
                                     }
-                                  >
-                                    <option value="Syrian / Egyptian / Lebanese">
-                                      Syrian / Egyptian / Lebanese
-                                    </option>
-                                    <option value="Other Sephardic">
-                                      Other Sephardic
-                                    </option>
-                                    <option value="Ashkenaz">Ashkenaz</option>
-                                    <option value="Other">Other</option>
-                                  </select>
+                                  />
                                 </td>
 
                                 {/* Other background */}

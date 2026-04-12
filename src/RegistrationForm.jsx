@@ -8,15 +8,19 @@ import {
   where,
   doc,
   getDoc,
-  updateDoc
+  updateDoc,
 } from "firebase/firestore";
 import { useSearchParams } from "react-router-dom";
 
 const ETHNICITIES = [
-  "Syrian / Egyptian / Lebanese",
-  "Other Sephardic",
+  "Syrian",
+  "Egyptian",
+  "Lebanese",
+  "Persian",
+  "Moroccan",
+  "Israeli",
   "Ashkenaz",
-  "Other",
+  "Other"
 ];
 const MARITAL_STATUSES = ["Single", "Divorced", "Widowed"];
 
@@ -36,7 +40,7 @@ export default function RegistrationForm() {
     phone: "",
     gender: "",
     birthDate: "",
-    ethnicity: "",
+    ethnicity: [],
     otherSpecify: "",
     isKohen: "no",
     isShomerShabbat: "yes",
@@ -85,83 +89,113 @@ export default function RegistrationForm() {
     setFormData({ ...formData, [field]: current });
   };
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  if (!formData.eventId) return alert("Please select an event");
-  setLoading(true);
+const handleEthnicityToggle = (val) => {
+  const isAlreadySelected = formData.ethnicity.includes(val);
 
-  try {
-    // 1. Split the data
-    const { eventId, ...userProfile } = formData;
-    const userAge = calculateAge(formData.birthDate);
-
-    // 2. Find or Create the permanent User based on Email
-    // (You could also use Phone number as the unique key)
-    const userQuery = query(collection(db, "users"), where("email", "==", formData.email.toLowerCase().trim()));
-    const userSnap = await getDocs(userQuery);
-    
-    let internalUserId;
-
-    if (!userSnap.empty) {
-      // Existing User: Update their profile with latest info
-      internalUserId = userSnap.docs[0].id;
-      await updateDoc(doc(db, "users", internalUserId), {
-        ...userProfile,
-        age: userAge,
-        createdAt: new Date()
-      });
-    } else {
-      // New User: Create permanent profile
-      const newUserRef = await addDoc(collection(db, "users"), {
-        ...userProfile,
-        age: userAge,
-        createdAt: new Date()
-      });
-      internalUserId = newUserRef.id;
+  // 1. If we are ADDING an option (any option), check the TOTAL limit
+  if (!isAlreadySelected) {
+    if (formData.ethnicity.length >= 2) {
+      alert("You can only select a maximum of 2 backgrounds total.");
+      return; // Exit early so no state update happens
     }
-
-    if (!eventId) {
-      setLoading(false);
-      return;
-    }
-
-    // 3. Check if they are already registered for THIS specific event
-    const regCheckQuery = query(
-      collection(db, "registrations"), 
-      where("eventId", "==", eventId),
-      where("userId", "==", internalUserId)
-    );
-    const regCheckSnap = await getDocs(regCheckQuery);
-
-    if (!regCheckSnap.empty) {
-      alert("You are already registered for this event!");
-      setLoading(false);
-      return;
-    }
-
-    // 4. Create the Event Registration
-    await addDoc(collection(db, "registrations"), {
-      userId: internalUserId,
-      eventId: eventId,
-      checkedIn: false,
-      tableNumber: null,
-      status: "pending invite", // other e.g., invited, confirmed, declined, waitlist, no response (3 days after invite)
-      groupId: "Group 1", // Default group assignment
-      timestamp: new Date(),
-      // We store a few redundant fields for quick filtering in Admin without extra joins
-      gender: formData.gender, 
-      firstName: formData.firstName,
-      lastName: formData.lastName
-    });
-
-    alert("Registration successful!");
-    window.location.reload();
-  } catch (err) {
-    console.error("Registration Error:", err);
-    alert("Error saving registration.");
   }
-  setLoading(false);
+
+  // 2. If removing OR if we haven't hit the limit yet, update state
+  setFormData((prev) => {
+    const current = [...prev.ethnicity];
+    const index = current.indexOf(val);
+
+    if (index > -1) {
+      current.splice(index, 1);
+    } else {
+      current.push(val);
+    }
+
+    return { ...prev, ethnicity: current };
+  });
 };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.eventId) return alert("Please select an event");
+    setLoading(true);
+
+    try {
+      // 1. Split the data
+      const { eventId, ...userProfile } = formData;
+      userProfile.ethnicity = userProfile.ethnicity.join(", "); // Convert array to string for storage
+      const userAge = calculateAge(formData.birthDate);
+
+      // 2. Find or Create the permanent User based on Email
+      // (You could also use Phone number as the unique key)
+      const userQuery = query(
+        collection(db, "users"),
+        where("email", "==", formData.email.toLowerCase().trim()),
+      );
+      const userSnap = await getDocs(userQuery);
+
+      let internalUserId;
+
+      if (!userSnap.empty) {
+        // Existing User: Update their profile with latest info
+        internalUserId = userSnap.docs[0].id;
+        await updateDoc(doc(db, "users", internalUserId), {
+          ...userProfile,
+          age: userAge,
+          createdAt: new Date(),
+        });
+      } else {
+        // New User: Create permanent profile
+        const newUserRef = await addDoc(collection(db, "users"), {
+          ...userProfile,
+          age: userAge,
+          createdAt: new Date(),
+        });
+        internalUserId = newUserRef.id;
+      }
+
+      if (!eventId) {
+        setLoading(false);
+        return;
+      }
+
+      // 3. Check if they are already registered for THIS specific event
+      const regCheckQuery = query(
+        collection(db, "registrations"),
+        where("eventId", "==", eventId),
+        where("userId", "==", internalUserId),
+      );
+      const regCheckSnap = await getDocs(regCheckQuery);
+
+      if (!regCheckSnap.empty) {
+        alert("You are already registered for this event!");
+        setLoading(false);
+        return;
+      }
+
+      // 4. Create the Event Registration
+      await addDoc(collection(db, "registrations"), {
+        userId: internalUserId,
+        eventId: eventId,
+        checkedIn: false,
+        tableNumber: null,
+        status: "pending invite", // other e.g., invited, confirmed, declined, waitlist, no response (3 days after invite)
+        groupId: "Group 1", // Default group assignment
+        timestamp: new Date(),
+        // We store a few redundant fields for quick filtering in Admin without extra joins
+        gender: formData.gender,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+      });
+
+      alert("Registration successful!");
+      window.location.reload();
+    } catch (err) {
+      console.error("Registration Error:", err);
+      alert("Error saving registration.");
+    }
+    setLoading(false);
+  };
 
   return (
     <div className="min-h-screen bg-white py-12 px-4">
@@ -230,7 +264,6 @@ const handleSubmit = async (e) => {
             </div>
           </div>
 
-          
           {/* Phone and email */}
           <div className="flex gap-4">
             <div className="flex-1">
@@ -266,9 +299,7 @@ const handleSubmit = async (e) => {
           {/* Gender Choice */}
           <div className="flex gap-4">
             <div className="flex-1">
-              <label className="block text-sm font-medium mb-1">
-                Gender
-              </label>
+              <label className="block text-sm font-medium mb-1">Gender</label>
               <select
                 required
                 className="w-full p-3 border rounded-lg"
@@ -319,27 +350,65 @@ const handleSubmit = async (e) => {
             </select>
           </section>
 
-          {/* Ethnicity */}
-          <section>
-            <label className="block font-semibold mb-2">What is your background?</label>
-            <select
-              required
-              className="w-full p-3 border rounded-lg mb-2"
-              onChange={(e) =>
-                setFormData({ ...formData, ethnicity: e.target.value })
-              }
-            >
-              <option value="">Select yours...</option>
-              {ETHNICITIES.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+          {/* Background Selection */}
+          <section className="space-y-4">
+            <label className="block font-bold text-slate-700 mb-2">
+              What is your background?{" "}
+              <span className="text-xs font-normal text-slate-400">
+                (Select all that apply)
+              </span>
+            </label>
+
+            {/* Selection Section */}
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">
+                Select up to 2
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {ETHNICITIES.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => handleEthnicityToggle(opt)}
+                    className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all
+            ${
+              formData.ethnicity.includes(opt)
+                ? "border-pink-500 bg-pink-50 text-pink-600"
+                : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+            }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => handleEthnicityToggle("Other Sephardic")}
+                  className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all
+          ${
+            formData.ethnicity.includes("Other Sephardic")
+              ? "border-pink-500 bg-pink-50 text-pink-600"
+              : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+          }`}
+                >
+                  Other Sephardic
+                </button>
+              </div>
+            </div>
+
+            {formData.ethnicity.includes("Other Sephardic") && (
+              <input
+                type="text"
+                placeholder="Specify other Sephardic background (e.g. Mixed, Mashadi, Shirazi)..."
+                className="w-full p-3 border rounded-lg mt-2 text-sm"
+                onChange={(e) =>
+                  setFormData({ ...formData, otherSpecify: e.target.value })
+                }
+              />
+            )}
           </section>
 
           {/* Specify for Other option */}
-          {formData.ethnicity === "Other" && (
+          {formData.ethnicity.includes("Other") && (
             <section>
               <label className="block font-semibold mb-2">
                 Please specify your background:
@@ -357,69 +426,66 @@ const handleSubmit = async (e) => {
 
           {/* Religious Lifestyle */}
           <section>
-              <label className="block font-semibold mb-2">
-                Shabbat level
+            <label className="block font-semibold mb-2">Shabbat level</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="isShomerShabbat"
+                  value="yes"
+                  onChange={() =>
+                    setFormData({ ...formData, isShomerShabbat: "yes" })
+                  }
+                />{" "}
+                Shomer Shabbat
               </label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="isShomerShabbat"
-                    value="yes"
-                    onChange={() =>
-                      setFormData({ ...formData, isShomerShabbat: "yes" })
-                    }
-                  />{" "}
-                  Shomer Shabbat
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="isShomerShabbat"
-                    value="no"
-                    onChange={() => setFormData({ ...formData, isShomerShabbat: "no" })}
-                  />{" "}
-                  Not fully shomer shabbat / still growing
-                </label>
-              </div>
-            </section>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="isShomerShabbat"
+                  value="no"
+                  onChange={() =>
+                    setFormData({ ...formData, isShomerShabbat: "no" })
+                  }
+                />{" "}
+                Not fully shomer shabbat / still growing
+              </label>
+            </div>
+          </section>
 
-            
           {/* Religious Lifestyle 2 */}
           <section>
-              <label className="block font-semibold mb-2">
-                Kashrut level
+            <label className="block font-semibold mb-2">Kashrut level</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="isShomerKashrut"
+                  value="yes"
+                  onChange={() =>
+                    setFormData({ ...formData, isShomerKashrut: "yes" })
+                  }
+                />{" "}
+                Kosher
               </label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="isShomerKashrut"
-                    value="yes"
-                    onChange={() =>
-                      setFormData({ ...formData, isShomerKashrut: "yes" })
-                    }
-                  />{" "}
-                  Kosher
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="isShomerKashrut"
-                    value="no"
-                    onChange={() => setFormData({ ...formData, isShomerKashrut: "no" })}
-                  />{" "}
-                  Not fully kosher / still growing
-                </label>
-              </div>
-            </section>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="isShomerKashrut"
+                  value="no"
+                  onChange={() =>
+                    setFormData({ ...formData, isShomerKashrut: "no" })
+                  }
+                />{" "}
+                Not fully kosher / still growing
+              </label>
+            </div>
+          </section>
 
           {/* Dress style, women only */}
           {formData.gender === "woman" && (
             <section>
-              <label className="block font-semibold mb-2">
-                Dress style
-              </label>
+              <label className="block font-semibold mb-2">Dress style</label>
               <div className="flex gap-4 mb-4">
                 <label className="flex items-center gap-2">
                   <input
@@ -437,7 +503,9 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="dressStyle"
                     value="skirtsPants"
-                    onChange={() => setFormData({ ...formData, dressStyle: "skirtsPants" })}
+                    onChange={() =>
+                      setFormData({ ...formData, dressStyle: "skirtsPants" })
+                    }
                   />{" "}
                   Skirts + pants
                 </label>
@@ -448,9 +516,7 @@ const handleSubmit = async (e) => {
           {/* Hair covering, women only */}
           {formData.gender === "woman" && (
             <section>
-              <label className="block font-semibold mb-2">
-                Hair covering
-              </label>
+              <label className="block font-semibold mb-2">Hair covering</label>
               <div className="flex gap-4 mb-4">
                 <label className="flex items-center gap-2">
                   <input
@@ -458,7 +524,10 @@ const handleSubmit = async (e) => {
                     name="hairCovering"
                     value="willCoverHair"
                     onChange={() =>
-                      setFormData({ ...formData, hairCovering: "willCoverHair" })
+                      setFormData({
+                        ...formData,
+                        hairCovering: "willCoverHair",
+                      })
                     }
                   />{" "}
                   Will cover hair after marriage
@@ -468,7 +537,9 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="hairCovering"
                     value="notPlanning"
-                    onChange={() => setFormData({ ...formData, hairCovering: "notPlanning" })}
+                    onChange={() =>
+                      setFormData({ ...formData, hairCovering: "notPlanning" })
+                    }
                   />{" "}
                   Not planning to cover hair
                 </label>
@@ -477,7 +548,9 @@ const handleSubmit = async (e) => {
                     type="radio"
                     name="hairCovering"
                     value="openFlexible"
-                    onChange={() => setFormData({ ...formData, hairCovering: "openFlexible" })}
+                    onChange={() =>
+                      setFormData({ ...formData, hairCovering: "openFlexible" })
+                    }
                   />{" "}
                   Open / flexible
                 </label>
@@ -551,7 +624,10 @@ const handleSubmit = async (e) => {
                     name="coverHead"
                     value="noPreference"
                     onChange={() =>
-                      setFormData({ ...formData, wantsCoveredHead: "noPreference" })
+                      setFormData({
+                        ...formData,
+                        wantsCoveredHead: "noPreference",
+                      })
                     }
                   />{" "}
                   Doesn't matter
