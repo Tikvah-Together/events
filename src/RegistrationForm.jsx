@@ -12,15 +12,13 @@ import {
 } from "firebase/firestore";
 import { useSearchParams } from "react-router-dom";
 
-const ETHNICITIES = [
+const SEPHARDIC_LIST = [
   "Syrian",
   "Egyptian",
   "Lebanese",
   "Persian",
   "Moroccan",
   "Israeli",
-  "Ashkenaz",
-  "Other"
 ];
 const MARITAL_STATUSES = ["Single", "Divorced", "Widowed"];
 
@@ -81,6 +79,12 @@ export default function RegistrationForm() {
     return age;
   };
 
+  // Helper to check for exact match in your comma-separated string
+  const isSelected = (val) => {
+    if (!formData.ethnicity) return false;
+    return formData.ethnicity.includes(val);
+  };
+
   const handleCheckbox = (list, value, field) => {
     const current = [...list];
     const index = current.indexOf(value);
@@ -89,31 +93,31 @@ export default function RegistrationForm() {
     setFormData({ ...formData, [field]: current });
   };
 
-const handleEthnicityToggle = (val) => {
-  const isAlreadySelected = formData.ethnicity.includes(val);
+  const handleEthnicityToggle = (val) => {
+    const isAlreadySelected = formData.ethnicity.includes(val);
 
-  // 1. If we are ADDING an option (any option), check the TOTAL limit
-  if (!isAlreadySelected) {
-    if (formData.ethnicity.length >= 2) {
-      alert("You can only select a maximum of 2 backgrounds total.");
-      return; // Exit early so no state update happens
-    }
-  }
-
-  // 2. If removing OR if we haven't hit the limit yet, update state
-  setFormData((prev) => {
-    const current = [...prev.ethnicity];
-    const index = current.indexOf(val);
-
-    if (index > -1) {
-      current.splice(index, 1);
-    } else {
-      current.push(val);
+    // 1. If we are ADDING an option (any option), check the TOTAL limit
+    if (!isAlreadySelected) {
+      if (formData.ethnicity.length >= 2) {
+        alert("You can only select a maximum of 2 backgrounds total.");
+        return; // Exit early so no state update happens
+      }
     }
 
-    return { ...prev, ethnicity: current };
-  });
-};
+    // 2. If removing OR if we haven't hit the limit yet, update state
+    setFormData((prev) => {
+      const current = [...prev.ethnicity];
+      const index = current.indexOf(val);
+
+      if (index > -1) {
+        current.splice(index, 1);
+      } else {
+        current.push(val);
+      }
+
+      return { ...prev, ethnicity: current };
+    });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -355,56 +359,109 @@ const handleEthnicityToggle = (val) => {
             <label className="block font-bold text-slate-700 mb-2">
               What is your background?{" "}
               <span className="text-xs font-normal text-slate-400">
-                (Select all that apply)
+                (Select up to 2 if applicable)
               </span>
             </label>
 
-            {/* Selection Section */}
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">
+              <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
                 Select up to 2
               </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {ETHNICITIES.map((opt) => (
+
+              {/* SEPHARDIC SECTION */}
+              <div className="mb-6">
+                <p className="text-sm font-bold text-slate-600 mb-3">
+                  Sephardic:
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {SEPHARDIC_LIST.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => handleEthnicityToggle(opt)}
+                      className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
+                        isSelected(opt)
+                          ? "border-pink-500 bg-pink-50 text-pink-600"
+                          : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+                      }`}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Other Sephardic Button & Input */}
+                <div className="mt-2">
                   <button
-                    key={opt}
                     type="button"
-                    onClick={() => handleEthnicityToggle(opt)}
-                    className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all
-            ${
-              formData.ethnicity.includes(opt)
-                ? "border-pink-500 bg-pink-50 text-pink-600"
-                : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
-            }`}
+                    onClick={() => handleEthnicityToggle("Other Sephardic")}
+                    className={`w-full px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all text-left ${
+                      isSelected("Other Sephardic")
+                        ? "border-pink-500 bg-pink-50 text-pink-600"
+                        : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+                    }`}
                   >
-                    {opt}
+                    Other Sephardic {isSelected("Other Sephardic") ? ":" : ""}
                   </button>
-                ))}
+
+                  {isSelected("Other Sephardic") && (
+                    <input
+                      type="text"
+                      placeholder="Specify (e.g. Mixed, Mashadi, Shirazi)..."
+                      className="w-full p-3 border rounded-xl mt-2 text-sm bg-white"
+                      value={formData.otherSephardicSpecify || ""}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          otherSephardicSpecify: e.target.value,
+                        })
+                      }
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* SEPARATE LINES SECTION */}
+              <div className="space-y-2 border-t border-slate-200 pt-4">
+                {/* Ashkenaz */}
                 <button
                   type="button"
-                  onClick={() => handleEthnicityToggle("Other Sephardic")}
-                  className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all
-          ${
-            formData.ethnicity.includes("Other Sephardic")
-              ? "border-pink-500 bg-pink-50 text-pink-600"
-              : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
-          }`}
+                  onClick={() => handleEthnicityToggle("Ashkenaz")}
+                  className={`w-full px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all text-left ${
+                    isSelected("Ashkenaz")
+                      ? "border-pink-500 bg-pink-50 text-pink-600"
+                      : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+                  }`}
                 >
-                  Other Sephardic
+                  Ashkenaz
                 </button>
+
+                {/* Other */}
+                <button
+                  type="button"
+                  onClick={() => handleEthnicityToggle("Other")}
+                  className={`w-full px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all text-left ${
+                    isSelected("Other")
+                      ? "border-pink-500 bg-pink-50 text-pink-600"
+                      : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+                  }`}
+                >
+                  Other {isSelected("Other") ? ":" : ""}
+                </button>
+
+                {isSelected("Other") && (
+                  <input
+                    type="text"
+                    placeholder="e.g., Chasidish, Chabad, etc."
+                    className="w-full p-3 border rounded-xl mt-1 text-sm bg-white"
+                    value={formData.otherSpecify || ""}
+                    onChange={(e) =>
+                      setFormData({ ...formData, otherSpecify: e.target.value })
+                    }
+                  />
+                )}
               </div>
             </div>
-
-            {formData.ethnicity.includes("Other Sephardic") && (
-              <input
-                type="text"
-                placeholder="Specify other Sephardic background (e.g. Mixed, Mashadi, Shirazi)..."
-                className="w-full p-3 border rounded-lg mt-2 text-sm"
-                onChange={(e) =>
-                  setFormData({ ...formData, otherSpecify: e.target.value })
-                }
-              />
-            )}
           </section>
 
           {/* Specify for Other option */}

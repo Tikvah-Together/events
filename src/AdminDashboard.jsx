@@ -1640,32 +1640,50 @@ export default function AdminDashboard() {
                             }
                           });
 
-                          // Apply multi-level sorting (Gender first, then Age)
+                          // Apply multi-level sorting (Group -> Gender -> Age)
                           const sortedList = [...listToDisplay].sort((a, b) => {
-                            // 1. Sort by Gender (Male/Boys first)
+                            // 1. Sort by Group ID First
+                            const groupA = (
+                              a.groupId || "Unassigned"
+                            ).toString();
+                            const groupB = (
+                              b.groupId || "Unassigned"
+                            ).toString();
+
+                            if (groupA !== groupB) {
+                              return groupA.localeCompare(groupB, undefined, {
+                                numeric: true,
+                                sensitivity: "base",
+                              });
+                            }
+
+                            // 2. Sort by Gender (Male/Boys first within the group)
                             const genderA = (a.gender || "").toLowerCase();
                             const genderB = (b.gender || "").toLowerCase();
 
                             if (genderA !== genderB) {
-                              // We treat "male" or "boy" as -1 to put them at the top
                               const isAMale =
-                                genderA === "male" || genderA === "boy";
+                                genderA === "male" ||
+                                genderA === "man" ||
+                                genderA === "boy";
                               const isBMale =
-                                genderB === "male" || genderB === "boy";
+                                genderB === "male" ||
+                                genderB === "man" ||
+                                genderB === "boy";
 
                               if (isAMale && !isBMale) return -1;
                               if (!isAMale && isBMale) return 1;
                             }
 
-                            // 2. If genders are the same, sort by Age (Youngest to Oldest)
-                            const ageA = parseInt(a.age) || 999; // Default high age if missing
+                            // 3. Sort by Age (Youngest to Oldest within the gender block)
+                            const ageA = parseInt(a.age) || 999;
                             const ageB = parseInt(b.age) || 999;
 
                             if (ageA !== ageB) {
                               return ageA - ageB;
                             }
 
-                            // 3. Optional: Final fallback to Name so the list is stable
+                            // 4. Stable fallback to First Name
                             return (a.firstName || "").localeCompare(
                               b.firstName || "",
                             );
