@@ -140,7 +140,8 @@ export default function Gatekeeper() {
 
     try {
       const userRef = doc(db, "users", adminTargetUser.id);
-      if (manualEntry.isPriority) {// need to make all other entries for this user non-priority if this one is marked as priority
+      if (manualEntry.isPriority) {
+        // need to make all other entries for this user non-priority if this one is marked as priority
         const existingFeedback = userRef.feedbackData || [];
         const updatedFeedback = existingFeedback.map((entry) => ({
           ...entry,
@@ -172,57 +173,75 @@ export default function Gatekeeper() {
     }
   };
 
-const tableGrid = useMemo(() => {
-  // Helper to extract ONLY numbers from a string (e.g., "Table 5" becomes 5)
+const groupGrids = useMemo(() => {
   const getOnlyNumber = (val) => {
     if (!val) return 0;
-    const cleaned = String(val).replace(/\D/g, ""); // Remove everything that isn't a digit
+    const cleaned = String(val).replace(/\D/g, "");
     return parseInt(cleaned) || 0;
   };
 
-  const checkedInUsers = masterUsers.filter((u) =>
-    attendees.some((reg) => reg.userId === u.id)
+  // 1. Get unique Group IDs from the registrations (attendees) 
+  // rather than the master list
+  const uniqueGroupIds = [
+    ...new Set(attendees.map((reg) => reg.groupId || "Unassigned")),
+  ].sort((a, b) =>
+    String(a).localeCompare(String(b), undefined, { numeric: true })
   );
 
-  // 1. Find the highest table number found in the registrations
-  const maxTableFound = Math.max(
-    ...attendees.map((a) => getOnlyNumber(a.tableNumber)),
-    0
-  );
+  // 2. Build the layout for each group
+  return uniqueGroupIds.map((groupId) => {
+    // Filter registrations belonging to this group
+    const groupRegs = attendees.filter((reg) => (reg.groupId || "Unassigned") === groupId);
 
-  // 2. Set a minimum grid size (e.g., at least 6 tables) so it looks like a room
-  const totalTables = Math.max(maxTableFound, 6); 
+    // Calculate the max table number specifically for this group's attendees
+    const groupMaxTable = Math.max(
+      6, 
+      ...groupRegs.map((reg) => getOnlyNumber(reg.tableNumber))
+    );
 
-  const girlsRow = Array(totalTables).fill(null);
-  const boysRow = Array(totalTables).fill(null);
+    const girlsRow = Array(groupMaxTable).fill(null);
+    const boysRow = Array(groupMaxTable).fill(null);
 
-  checkedInUsers.forEach((user) => {
-    const reg = attendees.find((r) => r.userId === user.id);
-    const tableNum = getOnlyNumber(reg?.tableNumber);
-    
-    // tableNum 1 goes into Index 0
-    const tableIdx = tableNum - 1;
+    groupRegs.forEach((reg) => {
+      // Find the base user info to match the registration
+      const user = masterUsers.find((u) => u.id === reg.userId);
+      const tableIdx = getOnlyNumber(reg.tableNumber) - 1;
 
-    if (tableIdx >= 0) {
-      if (user.gender === "man") {
-        boysRow[tableIdx] = { ...user, registration: reg };
-      } else {
-        girlsRow[tableIdx] = { ...user, registration: reg };
+      if (tableIdx >= 0 && user) {
+        // Use the gender from the registration record (redundant field) or user object
+        const gender = (reg.gender || user.gender || "").toLowerCase();
+        const isMale = ["man", "boy", "male"].includes(gender);
+
+        const personData = { ...user, ...reg }; // Merge user info and registration info
+
+        if (isMale) {
+          boysRow[tableIdx] = personData;
+        } else {
+          girlsRow[tableIdx] = personData;
+        }
       }
-    }
-  });
+    });
 
-  return { girlsRow, boysRow, tableCount: totalTables };
+    // Stats based on registrations in this group
+    const stats = {
+      boys: groupRegs.filter(r => ["man", "boy", "male"].includes(r.gender?.toLowerCase())).length,
+      girls: groupRegs.filter(r => !["man", "boy", "male"].includes(r.gender?.toLowerCase())).length,
+    };
+
+    return { groupId, girlsRow, boysRow, stats, tableCount: groupMaxTable };
+  });
 }, [masterUsers, attendees]);
 
   // Helper to render a table square
   const TableSquare = ({ person, tableNum, colorClass }) => (
-    <div 
+    <div
       onClick={() => person && setAdminTargetUser(person)}
       className={`relative h-24 w-full border-2 rounded-xl flex flex-col items-center justify-center p-2 transition-all cursor-pointer
-        ${person 
-          ? `${colorClass} border-transparent shadow-sm hover:scale-105` 
-          : "border-dashed border-slate-200 bg-white opacity-40"}`}
+        ${
+          person
+            ? `${colorClass} border-transparent shadow-sm hover:scale-105`
+            : "border-dashed border-slate-200 bg-white opacity-40"
+        }`}
     >
       <span className="absolute top-1 left-2 text-[10px] font-black opacity-30">
         T-{tableNum}
@@ -233,13 +252,15 @@ const tableGrid = useMemo(() => {
             {person.firstName}
           </p>
           <div className="mt-1 flex gap-1">
-             {person.feedbackData?.length > 0 && (
-               <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-             )}
+            {person.feedbackData?.length > 0 && (
+              <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+            )}
           </div>
         </>
       ) : (
-        <span className="text-[10px] text-slate-300 font-bold uppercase">Empty</span>
+        <span className="text-[10px] text-slate-300 font-bold uppercase">
+          Empty
+        </span>
       )}
     </div>
   );
@@ -260,8 +281,12 @@ const tableGrid = useMemo(() => {
         <div className="max-w-7xl mx-auto">
           <div className="flex justify-between items-center mb-8">
             <div>
-              <h1 className="text-2xl font-black text-slate-900 uppercase">Control Room</h1>
-              <p className="text-slate-500">{currentEvent?.name} • {attendees.length} Checked In</p>
+              <h1 className="text-2xl font-black text-slate-900 uppercase">
+                Control Room
+              </h1>
+              <p className="text-slate-500">
+                {currentEvent?.name} • {attendees.length} Checked In
+              </p>
             </div>
             <button
               onClick={() => setViewMode("user")}
@@ -271,43 +296,74 @@ const tableGrid = useMemo(() => {
             </button>
           </div>
 
-          <div className="space-y-12">
-            {/* GIRLS ROW */}
-            <section>
-              <h2 className="text-xs font-black text-pink-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <span className="w-8 h-px bg-pink-200" /> Women's Row
-              </h2>
-              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
-                {tableGrid.girlsRow.map((person, idx) => (
-                  <TableSquare 
-                    key={`girl-${idx}`} 
-                    person={person} 
-                    tableNum={idx + 1} 
-                    colorClass="bg-pink-100 text-pink-700"
-                  />
-                ))}
-              </div>
-            </section>
+          {/* STATISTICS SUMMARY BAR */}
+          <div className="space-y-12 mb-12">
+            {groupGrids.map((group) => (
+              <section
+                key={group.groupId}
+                className="border-t-2 border-slate-200 pt-4"
+              >
+                {/* GROUP HEADER & MINI STATS */}
+                <div className="flex justify-between items-end mb-4">
+                  <div>
+                    <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">
+                      Group {group.groupId}
+                    </h2>
+                    <p className="text-slate-500 font-medium">
+                      Table Layout & Assignments
+                    </p>
+                  </div>
 
-            {/* BOYS ROW */}
-            <section>
-              <h2 className="text-xs font-black text-blue-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <span className="w-8 h-px bg-blue-200" /> Men's Row
-              </h2>
-              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
-                {tableGrid.boysRow.map((person, idx) => (
-                  <TableSquare 
-                    key={`boy-${idx}`} 
-                    person={person} 
-                    tableNum={idx + 1} 
-                    colorClass="bg-blue-100 text-blue-700"
-                  />
-                ))}
-              </div>
-            </section>
+                  <div className="flex gap-3">
+                    <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-xl text-xs font-bold border border-blue-100">
+                      Boys: {group.stats.boys}
+                    </div>
+                    <div className="bg-pink-50 text-pink-700 px-4 py-2 rounded-xl text-xs font-bold border border-pink-100">
+                      Girls: {group.stats.girls}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-12">
+                  {/* WOMEN'S ROW FOR THIS GROUP */}
+                  <section>
+                    <h3 className="text-[10px] font-black text-pink-500 uppercase tracking-[0.3em] mb-4 flex items-center gap-2">
+                      <span className="w-12 h-px bg-pink-200" /> Women's Row
+                    </h3>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
+                      {group.girlsRow.map((person, idx) => (
+                        <TableSquare
+                          key={`group-${group.groupId}-girl-${idx}`}
+                          person={person}
+                          tableNum={idx + 1}
+                          colorClass="bg-pink-100 text-pink-700 border-pink-200"
+                        />
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* MEN'S ROW FOR THIS GROUP */}
+                  <section>
+                    <h3 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] mb-4 flex items-center gap-2">
+                      <span className="w-12 h-px bg-blue-200" /> Men's Row
+                    </h3>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
+                      {group.boysRow.map((person, idx) => (
+                        <TableSquare
+                          key={`group-${group.groupId}-boy-${idx}`}
+                          person={person}
+                          tableNum={idx + 1}
+                          colorClass="bg-blue-100 text-blue-700 border-blue-200"
+                        />
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              </section>
+            ))}
           </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {masterUsers
               .filter((u) => attendees.some((reg) => reg.userId === u.id))
               .map((user) => {
@@ -356,7 +412,7 @@ const tableGrid = useMemo(() => {
                 );
               })}
           </div>
-      </div>
+        </div>
 
         {/* MANUAL ENTRY MODAL */}
         {adminTargetUser && (
@@ -489,7 +545,9 @@ const tableGrid = useMemo(() => {
     );
   }
 
-  {/* IDENTITY SELECTION MODAL */}
+  {
+    /* IDENTITY SELECTION MODAL */
+  }
   if (potentialMatches.length > 1) {
     return (
       <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">

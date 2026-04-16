@@ -734,12 +734,12 @@ export default function AdminDashboard() {
 
   const stats = useMemo(() => {
     const getListStats = (list) => {
-      const boys = list.filter((u) =>
-        ["male", "boy", "man"].includes(u.gender?.toLowerCase()),
+      // Simplified since data is always man/woman
+      const boys = list.filter((u) => u.gender?.toLowerCase() === "man").length;
+      const girls = list.filter(
+        (u) => u.gender?.toLowerCase() === "woman",
       ).length;
-      const girls = list.filter((u) =>
-        ["female", "girl", "woman"].includes(u.gender?.toLowerCase()),
-      ).length;
+
       const total = boys + girls;
       const ratio =
         total > 0
@@ -748,6 +748,7 @@ export default function AdminDashboard() {
               g: Math.round((girls / total) * 100),
             }
           : { b: 0, g: 0 };
+
       return { boys, girls, total, ratio };
     };
 
@@ -1477,7 +1478,8 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* STATISTICS SUMMARY BAR */}
-                <div className="flex gap-4 mb-4">
+                <div className="flex flex-wrap gap-4 mb-4">
+                  {/* OVERALL TOTALS */}
                   <div className="bg-white px-6 py-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-6">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                       {activeTab === "master" ? "Total List" : "Event Total"}
@@ -1495,6 +1497,32 @@ export default function AdminDashboard() {
                       </span>
                     </div>
                   </div>
+
+                  {/* GROUP BREAKDOWN (Only shows on Events tab) */}
+                  {activeTab === "events" &&
+                    Object.entries(stats.groupStats).map(
+                      ([groupId, groupData]) => (
+                        <div
+                          key={groupId}
+                          className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-200 flex items-center gap-4"
+                        >
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                            Group {groupId}
+                          </span>
+                          <div className="flex gap-3 text-xs font-bold">
+                            <span className="text-blue-600">
+                              B: {groupData.boys}
+                            </span>
+                            <span className="text-pink-600">
+                              G: {groupData.girls}
+                            </span>
+                            <span className="text-slate-400">
+                              {groupData.ratio.b}% / {groupData.ratio.g}%
+                            </span>
+                          </div>
+                        </div>
+                      ),
+                    )}
                 </div>
 
                 {/* TABLE SECTION */}
@@ -1702,57 +1730,6 @@ export default function AdminDashboard() {
                               // Compare against the previous item in the SORTED list, not filteredAttendees
                               isNewGroup =
                                 a.groupId !== sortedList[index - 1].groupId;
-                            }
-
-                            {
-                              activeTab === "events" &&
-                                (isNewGroup || index === 0) && (
-                                  <tr className="bg-slate-100/50">
-                                    <td
-                                      colSpan="100%"
-                                      className="px-6 py-2 border-y border-slate-200"
-                                    >
-                                      <div className="flex justify-between items-center">
-                                        <span className="font-black text-slate-700 uppercase text-[11px]">
-                                          Group: {a.groupId || "Unassigned"}
-                                        </span>
-                                        <div className="flex gap-4 text-[11px] font-bold">
-                                          <span className="text-blue-700">
-                                            Boys:{" "}
-                                            {
-                                              stats.groupStats[
-                                                a.groupId || "Unassigned"
-                                              ]?.boys
-                                            }
-                                          </span>
-                                          <span className="text-pink-700">
-                                            Girls:{" "}
-                                            {
-                                              stats.groupStats[
-                                                a.groupId || "Unassigned"
-                                              ]?.girls
-                                            }
-                                          </span>
-                                          <span className="text-slate-500">
-                                            Ratio:{" "}
-                                            {
-                                              stats.groupStats[
-                                                a.groupId || "Unassigned"
-                                              ]?.ratio.b
-                                            }
-                                            % /{" "}
-                                            {
-                                              stats.groupStats[
-                                                a.groupId || "Unassigned"
-                                              ]?.ratio.g
-                                            }
-                                            %
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
                             }
 
                             return (
