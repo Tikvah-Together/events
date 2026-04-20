@@ -192,6 +192,28 @@ export default function RegistrationForm() {
         lastName: formData.lastName,
       });
 
+      // 5. Trigger the Email via the 'email' collection
+      // Find the name dynamically to ensure it isn't stale
+      const eventNameForEmail = urlEventId
+        ? selectedEventName
+        : events.find((e) => e.id === eventId)?.name;
+
+      await addDoc(collection(db, "email"), {
+        to: formData.email.toLowerCase().trim(),
+        message: {
+          subject: `Registration Received: ${eventNameForEmail || "Upcoming Event"}`,
+          html: `
+      <div style="font-family: sans-serif; color: #334155;">
+        <h1 style="color: #0f172a;">Hi ${formData.firstName}!</h1>
+        <p>Thanks for registering for <b>${eventNameForEmail || "our upcoming event"}</b>.</p>
+        <p>Status: <b>Pending Invite</b></p>
+        <p>Please keep an eye out for an invitation to the event. You will have three days to accept the invitation.</p>
+        <p>Looking forward to seeing you there!</p>
+      </div>
+    `,
+        },
+      });
+
       alert("Registration successful!");
       window.location.reload();
     } catch (err) {

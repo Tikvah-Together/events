@@ -119,7 +119,7 @@ function App() {
                 </AdminGuard>
               }
             />
-            <Route path="/scan" element={<SelfCheckIn />} />
+            <Route path="/selfcheckin" element={<SelfCheckIn />} />
           </Routes>
         </main>
 

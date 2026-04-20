@@ -402,15 +402,61 @@ export default function AdminDashboard() {
     }
   };
 
-  const sendInvite = async (attendeeId, name) => {
-    //TODO - this should trigger an email via a Cloud Function in production, but for now we'll just update the status in Firestore
+  const sendInvite = async (attendeeId, name, email) => {
+    if (!email) {
+      alert("This user has not set an email! They cannot be invited this way.");
+      return;
+    }
+
     if (window.confirm(`Send invite to ${name}?`)) {
       try {
+        // 1. Construct the URLs
+        const baseUrl = "https://events.tikvahtogether.org/selfcheckin";
+        const inviteParams = `?regId=${attendeeId}&eventId=${selectedEvent?.id}`;
+        const fullUrl = baseUrl + inviteParams;
+
+        // 2. Generate the QR Code URL using a free API (goqr.me)
+        // We encode the fullUrl to ensure it's handled correctly by the API
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(fullUrl)}`;
+
+        // 3. Update the registration status
         await updateDoc(doc(db, "registrations", attendeeId), {
           status: "invited",
+          invitedAt: new Date(),
         });
+
+        // 4. Trigger the invitation email
+        await addDoc(collection(db, "email"), {
+          to: email,
+          message: {
+            subject: `You're Invited to ${selectedEvent?.name}!`,
+            html: `
+            <div style="font-family: sans-serif; text-align: center; max-width: 500px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 15px;">
+              <h2 style="color: #1e3a8a;">Hi ${name}!</h2>
+              <p>You have been officially invited to <strong>${selectedEvent?.name}</strong>.</p>
+              
+              <p>Please click the button below to respond:</p>
+              <a href="${fullUrl}" style="display: inline-block; background: #1e3a8a; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                View Invitation & RSVP
+              </a>
+
+              <div style="margin-top: 30px; padding: 20px; background: #f8fafc; border-radius: 10px;">
+                <p style="font-size: 14px; color: #64748b; margin-bottom: 10px;">Or scan this QR code at the door:</p>
+                <img src="${qrCodeUrl}" alt="Invitation QR Code" style="border: 4px solid white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);" />
+              </div>
+
+              <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
+                Please respond within 3 days to secure your spot.
+              </p>
+            </div>
+          `,
+          },
+        });
+
+        alert("Invite and QR code sent successfully!");
       } catch (err) {
         console.error("Error sending invite:", err);
+        alert("Failed to send invite.");
       }
     }
   };
@@ -659,6 +705,46 @@ export default function AdminDashboard() {
       cleanupOldEvents();
     }
   }, [events]);
+
+  useEffect(() => {
+    const cleanupExpiredInvites = async () => {
+      // 1. Calculate the cutoff (72 hours ago)
+      const threeDaysAgo = new Date();
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+      try {
+        // 2. Query for users who are 'invited' and whose invite is older than 3 days
+        const q = query(
+          collection(db, "registrations"),
+          where("status", "==", "invited"),
+          where("invitedAt", "<", threeDaysAgo),
+        );
+
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) return;
+
+        // 3. Use a WriteBatch for better performance and atomicity
+        const batch = writeBatch(db);
+
+        querySnapshot.docs.forEach((docSnap) => {
+          const docRef = doc(db, "registrations", docSnap.id);
+          batch.update(docRef, {
+            status: "no response",
+          });
+        });
+
+        await batch.commit();
+        console.log(
+          `Successfully moved ${querySnapshot.size} users to 'no response'.`,
+        );
+      } catch (err) {
+        console.error("Error during invite cleanup:", err);
+      }
+    };
+
+    cleanupExpiredInvites();
+  }, []); // Empty dependency array ensures this only runs once when the dashboard mounts
 
   const [eventDate, setEventDate] = useState("");
   const [eventTime, setEventTime] = useState("");
@@ -1850,6 +1936,7 @@ export default function AdminDashboard() {
                                           sendInvite(
                                             a.id,
                                             `${a.firstName} ${a.lastName}`,
+                                            a.email,
                                           )
                                         }
                                         className="ml-2 text-xs text-blue-600 hover:underline"
