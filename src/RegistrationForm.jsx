@@ -201,20 +201,20 @@ export default function RegistrationForm() {
       await addDoc(collection(db, "email"), {
         to: formData.email.toLowerCase().trim(),
         message: {
-          subject: `Registration Received: ${eventNameForEmail || "Upcoming Event"}`,
+          subject: `Subject - SY SmartMatch - Registration Received`,
           html: `
       <div style="font-family: sans-serif; color: #334155;">
         <h1 style="color: #0f172a;">Hi ${formData.firstName}!</h1>
-        <p>Thanks for registering for <b>${eventNameForEmail || "our upcoming event"}</b>.</p>
-        <p>Status: <b>Pending Invite</b></p>
-        <p>Please keep an eye out for an invitation to the event. You will have three days to accept the invitation.</p>
-        <p>Looking forward to seeing you there!</p>
+        <p>Thank you for registering for SY SmartMatch.</p>
+        <p>Your registration has been received and is currently being reviewed to help create the best possible matches. We'll be in touch with event details and next steps.</p>
+        <br>
+        <p>SY SmartMatch Team</p>
       </div>
     `,
         },
       });
 
-      alert("Registration successful!");
+      alert("Thank you! Your registration has been received.\nYou’ll receive a confirmation email shortly.");
       window.location.reload();
     } catch (err) {
       console.error("Registration Error:", err);
@@ -485,23 +485,6 @@ export default function RegistrationForm() {
               </div>
             </div>
           </section>
-
-          {/* Specify for Other option */}
-          {formData.ethnicity.includes("Other") && (
-            <section>
-              <label className="block font-semibold mb-2">
-                Please specify your background:
-              </label>
-              <input
-                type="text"
-                placeholder="e.g., Chasidish, Chabad, etc."
-                className="w-full p-3 border rounded-lg mb-2"
-                onChange={(e) =>
-                  setFormData({ ...formData, otherSpecify: e.target.value })
-                }
-              />
-            </section>
-          )}
 
           {/* Religious Lifestyle */}
           <section>

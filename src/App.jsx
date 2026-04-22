@@ -5,6 +5,7 @@ import Gatekeeper from "./Gatekeeper";
 import AdminGuard from "./AdminGuard";
 import SelfCheckIn from "./SelfCheckIn";
 import { Tablet, ShieldCheck, UserPlus } from "lucide-react";
+import RsvpPage from "./RSVP";
 
 function Home() {
   return (
@@ -119,6 +120,7 @@ function App() {
                 </AdminGuard>
               }
             />
+            <Route path="/rsvp" element={<RsvpPage />} />
             <Route path="/selfcheckin" element={<SelfCheckIn />} />
           </Routes>
         </main>
