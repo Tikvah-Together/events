@@ -25,6 +25,7 @@ import {
   UserMinus,
   ChevronDown,
   Pause,
+  Bell,
 } from "lucide-react";
 
 export default function AdminDashboard() {
@@ -404,6 +405,78 @@ export default function AdminDashboard() {
     }
   };
 
+  const sendReminderEmails = async () => {
+    if (!selectedEvent) return;
+
+    const confirmMessage = `Are you sure you want to send a reminder email to all active participants for "${selectedEvent.name}"?`;
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      // 1. Fetch all registrations for this event
+      const regQuery = query(
+        collection(db, "registrations"),
+        where("eventId", "==", selectedEvent.id),
+      );
+      const regSnap = await getDocs(regQuery);
+
+      // 2. Filter statuses: No 'declined', 'no response', or 'waitlist'
+      const eligibleRegs = regSnap.docs.filter((doc) => {
+        const status = doc.data().status;
+        return !["declined", "no response", "waitlist"].includes(status);
+      });
+
+      if (eligibleRegs.length === 0) {
+        alert("No eligible participants found to receive a reminder.");
+        return;
+      }
+
+      // 3. Loop through and create email docs
+      const emailPromises = eligibleRegs.map(async (regDoc) => {
+        const regData = regDoc.data();
+
+        // Fetch user data to get the name and email
+        const userSnap = await getDoc(doc(db, "users", regData.userId));
+        if (!userSnap.exists()) return;
+
+        const userData = userSnap.data();
+        const cancelUrl = `https://events.tikvahtogether.org/rsvp?userId=${regData.userId}&eventId=${selectedEvent.id}&action=cancel`;
+
+        return addDoc(collection(db, "email"), {
+          to: userData.email,
+          message: {
+            subject: "SY SmartMatch Reminder: Tomorrow",
+            html: `
+            <div style="font-family: sans-serif; color: #334155; max-width: 600px;">
+              <p>Hi ${userData.firstName},</p>
+              <p>Looking forward to tomorrow’s SY SmartMatch!</p>
+              <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <strong>Location:</strong> ${selectedEvent.fullAddress || selectedEvent.generalLocation}<br>
+                <strong>Time:</strong> ${selectedEvent.scheduledAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </div>
+              <p>Please arrive on time for check-in.</p>
+              <p>We’re holding your spot. If anything changed and you can’t make it, please let us know so we can offer it to someone else.</p>
+              
+              <div style="margin: 30px 0;">
+                <a href="${cancelUrl}" style="background: #ef4444; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                  I can’t make it
+                </a>
+              </div>
+              
+              <p>See you tomorrow,<br>SY SmartMatch Team</p>
+            </div>
+          `,
+          },
+        });
+      });
+
+      await Promise.all(emailPromises);
+      alert(`Successfully queued ${eligibleRegs.length} reminder emails!`);
+    } catch (err) {
+      console.error("Error sending reminders:", err);
+      alert("Failed to send reminders.");
+    }
+  };
+
   const sendInvite = async (a) => {
     console.log(a);
     if (!a.email) {
@@ -526,7 +599,7 @@ export default function AdminDashboard() {
           eventId: targetEventId,
           eventName: targetEvent?.name || "Unknown Event",
           groupId: "Group 1", // Default group
-          confirmationStatus: "pending invite",
+          status: "pending invite",
           checkedIn: false,
         });
       });
@@ -1208,6 +1281,14 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
+                      {/* Reminder Button */}
+                      <button
+                        onClick={sendReminderEmails}
+                        className="px-4 py-2 bg-white text-blue-900 border border-blue-900 rounded-md font-bold flex items-center gap-2 hover:bg-blue-50 transition-all duration-200 shadow-sm"
+                        title="Send Reminders"
+                      >
+                        <Bell size={16} /> Remind All
+                      </button>
                       <button
                         onClick={() =>
                           toggleStatus(selectedEvent.id, selectedEvent.active)
@@ -1963,9 +2044,7 @@ export default function AdminDashboard() {
                                     </select>
                                     {a.status === "pending invite" && (
                                       <button
-                                        onClick={() =>
-                                          sendInvite(a)
-                                        }
+                                        onClick={() => sendInvite(a)}
                                         className="ml-2 text-xs text-blue-600 hover:underline"
                                       >
                                         Invite
