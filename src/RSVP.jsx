@@ -44,6 +44,8 @@ const RsvpPage = () => {
         if (regSnap.empty) {
           setErrorMsg("No registration found for this event.");
           setStep("error");
+          console.log("userId = " + userId);
+          console.log("eventId = " + eventId);
           return;
         }
 

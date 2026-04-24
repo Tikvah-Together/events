@@ -201,7 +201,7 @@ export default function RegistrationForm() {
       await addDoc(collection(db, "email"), {
         to: formData.email.toLowerCase().trim(),
         message: {
-          subject: `Subject - SY SmartMatch - Registration Received`,
+          subject: `SY SmartMatch - Registration Received`,
           html: `
       <div style="font-family: sans-serif; color: #334155;">
         <h1 style="color: #0f172a;">Hi ${formData.firstName}!</h1>

@@ -404,38 +404,42 @@ export default function AdminDashboard() {
     }
   };
 
-  const sendInvite = async (attendeeId, firstName, lastName, email) => {
-    if (!email) {
+  const sendInvite = async (a) => {
+    console.log(a);
+    if (!a.email) {
       alert("This user has not set an email! They cannot be invited this way.");
       return;
     }
 
-    if (window.confirm(`Send invite to ${firstName} ${lastName}?`)) {
+    if (window.confirm(`Send invite to ${a.firstName} ${a.lastName}?`)) {
       try {
         // 1. Construct the URLs
         const baseUrl = "https://events.tikvahtogether.org/rsvp";
-        const inviteParams = `?regId=${attendeeId}&eventId=${selectedEvent?.id}`;
+        const inviteParams = `?userId=${a.userId}&eventId=${selectedEvent?.id}`;
         const fullUrl = baseUrl + inviteParams;
 
         // 2. Update the registration status
-        await updateDoc(doc(db, "registrations", attendeeId), {
+        await updateDoc(doc(db, "registrations", a.id), {
           status: "invited",
         });
 
         // 3. Trigger the invitation email
         await addDoc(collection(db, "email"), {
-          to: email,
+          to: a.email,
           message: {
             subject: `SY SmartMatch - You're Invited`,
             html: `
             <div style="font-family: sans-serif; text-align: center; max-width: 500px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 15px;">
-              <h2 style="color: #1e3a8a;">Hi ${firstName}!</h2>
+              <h2 style="color: #1e3a8a;">Hi ${a.firstName}!</h2>
               <p>We're excited to invite you to SY SmartMatch.</p>
 
               <p>
               <strong>Event Details:</strong>
+              <br>
               Date: ${selectedEvent?.scheduledAt?.toDate().toLocaleDateString() || "TBA"}
+              <br>
               Time: ${selectedEvent?.scheduledAt?.toDate().toLocaleTimeString() || "TBA"}
+              <br>
               Location: ${selectedEvent?.generalLocation || "TBA"}
               </p>
               
@@ -782,6 +786,7 @@ export default function AdminDashboard() {
   const updateAttendeeField = async (attendee, field, newValue) => {
     try {
       const registrationFields = [
+        "status",
         "checkedIn",
         "groupId",
         "tableNumber",
@@ -1959,12 +1964,7 @@ export default function AdminDashboard() {
                                     {a.status === "pending invite" && (
                                       <button
                                         onClick={() =>
-                                          sendInvite(
-                                            a.id,
-                                            a.firstName,
-                                            a.lastName,
-                                            a.email,
-                                          )
+                                          sendInvite(a)
                                         }
                                         className="ml-2 text-xs text-blue-600 hover:underline"
                                       >
