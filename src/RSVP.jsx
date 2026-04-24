@@ -193,7 +193,7 @@ const RsvpPage = () => {
           </p>
           {regStatus === "confirmed" && (
             <p className="text-slate-500 mt-4">
-              We've sent you an email with full details. If you would like to cancel your registration, please click <a href={window.location + "&action=cancel"} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">here</a>.
+              We've sent you an email with full details.
             </p>
           )}
         </div>

@@ -408,7 +408,7 @@ export default function AdminDashboard() {
   const sendReminderEmails = async () => {
     if (!selectedEvent) return;
 
-    const confirmMessage = `Are you sure you want to send a reminder email to all active participants for "${selectedEvent.name}"?`;
+    const confirmMessage = `Are you sure you want to send a reminder email to all confirmed participants for "${selectedEvent.name}"?`;
     if (!window.confirm(confirmMessage)) return;
 
     try {
@@ -419,10 +419,9 @@ export default function AdminDashboard() {
       );
       const regSnap = await getDocs(regQuery);
 
-      // 2. Filter statuses: No 'declined', 'no response', or 'waitlist'
+      // 2. Filter statuses: Only confirmed are eligible
       const eligibleRegs = regSnap.docs.filter((doc) => {
-        const status = doc.data().status;
-        return !["declined", "no response", "waitlist"].includes(status);
+        return doc.data().status === "confirmed";
       });
 
       if (eligibleRegs.length === 0) {
