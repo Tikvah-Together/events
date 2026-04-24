@@ -14,6 +14,7 @@ import {
 const RsvpPage = () => {
   const [step, setStep] = useState("loading");
   const [registrationId, setRegistrationId] = useState(null); // We need the Doc ID to update it later
+  const [regStatus, setRegStatus] = useState("invited");
   const [attendee, setAttendee] = useState(null); // Data from 'users' collection
   const [eventData, setEventData] = useState(null); // Data from 'events' collection
   const [errorMsg, setErrorMsg] = useState("");
@@ -53,6 +54,7 @@ const RsvpPage = () => {
         const regDoc = regSnap.docs[0];
         const regData = regDoc.data();
         setRegistrationId(regDoc.id);
+        setRegStatus(regData.status);
 
         // 2. Fetch User and Event details in parallel using the IDs
         const [userSnap, eventSnap] = await Promise.all([
@@ -86,6 +88,7 @@ const RsvpPage = () => {
 
   const handleResponse = async (newStatus) => {
     setStep("loading");
+    setRegStatus(newStatus);
     try {
       // 1. Update the 'registrations' document using the ID we found earlier
       await updateDoc(doc(db, "registrations", registrationId), {
@@ -115,7 +118,7 @@ const RsvpPage = () => {
 
                 <p>We look forward to seeing you there.</p>
 
-                <p>If anything changes and you're no longer able to attend, please let us know here: <a href="${window.location + '?action=cancel'}" target="_blank" rel="noopener noreferrer">Cancel Registration</a></p>
+                <p>If anything changes and you're no longer able to attend, please let us know here: <a href="${window.location + '&action=cancel'}" target="_blank" rel="noopener noreferrer">Cancel Registration</a></p>
                 <br>
                 <p>Best,
                 <br>
@@ -159,7 +162,7 @@ const RsvpPage = () => {
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
           <div
             className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${
-              attendee.status === "confirmed"
+              regStatus === "confirmed"
                 ? "bg-green-100 text-green-600"
                 : "bg-slate-100 text-slate-600"
             }`}
@@ -180,15 +183,15 @@ const RsvpPage = () => {
             </svg>
           </div>
           <h1 className="text-3xl font-bold text-slate-900 mb-2">
-            {attendee.status === "confirmed"
+            {regStatus === "confirmed"
               ? "You’re confirmed!"
               : "Response Received"}
           </h1>
           <p className="text-slate-500">
             Thank you, {attendee.firstName}. Your status is now:{" "}
-            <strong>{attendee.status}</strong>.
+            <strong>{regStatus}</strong>.
           </p>
-          {attendee.status === "confirmed" && (
+          {regStatus === "confirmed" && (
             <p className="text-slate-500 mt-4">
               We've sent you an email with full details. If you would like to cancel your registration, please click <a href={window.location + "?action=cancel"} className="text-blue-600 underline" target="_blank" rel="noopener noreferrer">here</a>.
             </p>
@@ -196,6 +199,37 @@ const RsvpPage = () => {
         </div>
       </div>
     );
+  }
+
+  if (action === "cancel") {
+     return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+        <h2 className="text-2xl font-bold text-slate-900 mb-2">
+          Cancel Invitation?
+        </h2>
+        <p className="text-slate-500 mb-8">
+          Hi {attendee?.firstName}, would you like to cancel your invitation?
+        </p>
+
+        <div className="space-y-4">
+          <button
+            onClick={() => handleResponse("declined")}
+            className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-800 transition-colors shadow-lg"
+          >
+            Yes, cancel my invitation.
+          </button>
+
+          <button
+            onClick={() => handleResponse("confrimed")}
+            className="w-full bg-white border border-slate-200 text-slate-500 font-bold py-4 rounded-xl hover:bg-slate-50 transition-colors"
+          >
+            No, I can make it.
+          </button>
+        </div>
+      </div>
+    </div>
+  );
   }
 
   return (
