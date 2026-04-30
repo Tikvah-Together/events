@@ -405,74 +405,112 @@ export default function AdminDashboard() {
     }
   };
 
-  const sendReminderEmails = async () => {
+  const sendBulkReminders = async () => {
     if (!selectedEvent) return;
 
     const confirmMessage = `Are you sure you want to send a reminder email to all confirmed participants for "${selectedEvent.name}"?`;
     if (!window.confirm(confirmMessage)) return;
 
     try {
-      // 1. Fetch all registrations for this event
       const regQuery = query(
         collection(db, "registrations"),
         where("eventId", "==", selectedEvent.id),
+        where("status", "==", "confirmed"),
       );
       const regSnap = await getDocs(regQuery);
 
-      // 2. Filter statuses: Only confirmed are eligible
-      const eligibleRegs = regSnap.docs.filter((doc) => {
-        return doc.data().status === "confirmed";
-      });
-
-      if (eligibleRegs.length === 0) {
-        alert("No eligible participants found to receive a reminder.");
+      if (regSnap.empty) {
+        alert("No confirmed participants found.");
         return;
       }
 
-      // 3. Loop through and create email docs
-      const emailPromises = eligibleRegs.map(async (regDoc) => {
+      const emailPromises = regSnap.docs.map(async (regDoc) => {
         const regData = regDoc.data();
-
-        // Fetch user data to get the name and email
         const userSnap = await getDoc(doc(db, "users", regData.userId));
-        if (!userSnap.exists()) return;
 
-        const userData = userSnap.data();
-        const cancelUrl = `https://events.tikvahtogether.org/rsvp?userId=${regData.userId}&eventId=${selectedEvent.id}&action=cancel`;
-
-        return addDoc(collection(db, "email"), {
-          to: userData.email,
-          message: {
-            subject: "SY SmartMatch Reminder: Tomorrow",
-            html: `
-            <div style="font-family: sans-serif; color: #334155; max-width: 600px;">
-              <p>Hi ${userData.firstName},</p>
-              <p>Looking forward to tomorrow’s SY SmartMatch!</p>
-              <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <strong>Location:</strong> ${selectedEvent.fullAddress || selectedEvent.generalLocation}<br>
-                <strong>Time:</strong> ${selectedEvent.scheduledAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </div>
-              <p>Please arrive on time for check-in.</p>
-              <p>We’re holding your spot. If anything changed and you can’t make it, please let us know so we can offer it to someone else.</p>
-              
-              <div style="margin: 30px 0;">
-                <a href="${cancelUrl}" style="background: #ef4444; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-                  I can’t make it
-                </a>
-              </div>
-              
-              <p>See you tomorrow,<br>SY SmartMatch Team</p>
-            </div>
-          `,
-          },
-        });
+        if (userSnap.exists()) {
+          // We pass the user ID too for the cancel link
+          return sendIndividualReminder(
+            { ...userSnap.data(), id: userSnap.id },
+            selectedEvent,
+          );
+        }
       });
 
       await Promise.all(emailPromises);
-      alert(`Successfully queued ${eligibleRegs.length} reminder emails!`);
+      alert(`Successfully queued reminders for ${regSnap.size} participants!`);
     } catch (err) {
-      console.error("Error sending reminders:", err);
-      alert("Failed to send reminders.");
+      console.error("Bulk send error:", err);
+    }
+  };
+
+  const sendIndividualReminder = async (userData, eventData) => {
+    const cancelUrl = `https://events.tikvahtogether.org/rsvp?userId=${userData.userId}&eventId=${eventData.id}&action=cancel`;
+
+    try {
+      await addDoc(collection(db, "email"), {
+        to: userData.email,
+        message: {
+          subject: "SY SmartMatch Reminder: Tomorrow",
+          html: `
+          <div style="font-family: sans-serif; color: #334155; max-width: 600px;">
+            <p>Hi ${userData.firstName},</p>
+            <p>Looking forward to seeing you at the SY SmartMatch event.</p>
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
+              <p><strong>Event details:</strong></p>
+              <strong>Date:</strong> ${eventData.scheduledAt?.toDate().toLocaleDateString()}<br>
+              <strong>Time:</strong> ${eventData.scheduledAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}<br>
+              <strong>Location:</strong> ${eventData.fullAddress || eventData.generalLocation}
+            </div>
+            <p>Upon arrival, please check in at the front desk or scan the QR code on site.</p>
+            <p>You’ll receive your starting table number and be guided where to sit.</p>
+            <p>Please bring your phone fully charged, as it will be used during the event.</p>
+            <p>Paper forms will also be available as an alternative.</p>
+            <p>To ensure the best experience, please arrive on time, as late arrival may result in missing some of your curated dates.</p>
+            <p>We’ve carefully arranged the event based on confirmed attendees.</p>
+            
+            If anything changes and you’re no longer able to attend, please let us know here: <a href="${cancelUrl}" target="_blank" rel="noopener noreferrer">Cancel Registration</a></p>
+            
+            <p>See you there,<br>SY SmartMatch Team</p>
+          </div>
+        `,
+        },
+      });
+      return true;
+    } catch (err) {
+      console.error("Error sending individual reminder:", err);
+      return false;
+    }
+  };
+
+  const sendFinalReminder = async (userData, eventData) => {
+    const confirmationURL = `https://events.tikvahtogether.org/rsvp?userId=${userData.userId}&eventId=${eventData.id}`;
+    try {
+      await addDoc(collection(db, "email"), {
+        to: userData.email,
+        message: {
+          subject: "SY SmartMatch – Final Reminder to Confirm Your Spot",
+          html: `
+          <div style="font-family: sans-serif; color: #334155; max-width: 600px;">
+            <p>Hi ${userData.firstName},</p>
+            <p>This is a final reminder to confirm your spot for the upcoming SY SmartMatch event.</p>
+            <p>We’ll be finalizing the list shortly, so please confirm as soon as possible if you’d like to attend.</p>
+
+            <div style="margin: 30px 0;">
+                <a href="${confirmationURL}" style="background: #1e3a8a; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                Confirm Your Spot
+                </a>
+              </div>
+            
+            <p>See you there,<br>SY SmartMatch Team</p>
+          </div>
+        `,
+        },
+      });
+      return true;
+    } catch (err) {
+      console.error("Error sending individual reminder:", err);
+      return false;
     }
   };
 
@@ -518,7 +556,7 @@ export default function AdminDashboard() {
               <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
                 Please confirm your spot within 3 days to secure your place.
               </p>
-              <p>We'll send more details once your spot is confirmed.</p>
+              <p>Full event details will be sent the day before the event.</p>
               
               <p>Please click the button below to respond:</p>
               <a href="${fullUrl}" style="display: inline-block; background: #1e3a8a; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">
@@ -1282,7 +1320,7 @@ export default function AdminDashboard() {
                     <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
                       {/* Reminder Button */}
                       <button
-                        onClick={sendReminderEmails}
+                        onClick={sendBulkReminders}
                         className="px-4 py-2 bg-white text-blue-900 border border-blue-900 rounded-md font-bold flex items-center gap-2 hover:bg-blue-50 transition-all duration-200 shadow-sm"
                         title="Send Reminders"
                       >
@@ -2047,6 +2085,25 @@ export default function AdminDashboard() {
                                         className="ml-2 text-xs text-blue-600 hover:underline"
                                       >
                                         Invite
+                                      </button>
+                                    )}
+                                    {a.status !== "confirmed" && (
+                                      <button
+                                        onClick={() => {
+                                          if (
+                                            window.confirm(
+                                              `Send manual reminder to ${a.firstName} ${a.lastName}?`,
+                                            )
+                                          ) {
+                                            sendFinalReminder(
+                                              a,
+                                              selectedEvent,
+                                            );
+                                          }
+                                        }}
+                                        className="ml-2 text-xs text-blue-600 hover:underline"
+                                      >
+                                        Remind
                                       </button>
                                     )}
                                   </td>

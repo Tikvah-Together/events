@@ -100,25 +100,17 @@ const RsvpPage = () => {
         await addDoc(collection(db, "email"), {
           to: attendee.email,
           message: {
-            subject: "SY SmartMatch - Your Spot is Confirmed",
+            subject: "SY SmartMatch - You're Confirmed",
             html: `
               <div style="font-family: sans-serif; color: #334155;">
                 <p>Hi ${attendee.firstName},</p>
-                <p>Your spot for SY SmartMatch event is confirmed! We're excited to have you join.</p>
-                <p><strong>Event details:</strong></p>
-                <p><strong>Date:</strong> ${eventData.scheduledAt?.toDate().toLocaleDateString()}</p>
-                <p><strong>Time:</strong> ${eventData.scheduledAt?.toDate().toLocaleTimeString()}</p>
-                <p><strong>Location:</strong> ${eventData.fullAddress}</p>
+                <p>You're confirmed for the upcoming SY SmartMatch event. We're looking forward to having you!</p>
+                <p>Full event details will be sent the day before the event.</p>
                 <p>Upon arrival, please check in at the front desk or scan the QR code on site.</p>
                 <p>You'll receive your starting table number and be guided where to sit.</p>
                 <p>Please bring your phone fully charged, as it will be used during the event.</p>
                 <p>Paper forms will also be available as an alternative.</p>
-
-                <p>To ensure the best experience, we recommend arriving on time, as late arrival will result in missing some of your curated dates.</p>
-
-                <p>We look forward to seeing you there.</p>
-
-                <p>If anything changes and you're no longer able to attend, please let us know here: <a href="${window.location + '&action=cancel'}" target="_blank" rel="noopener noreferrer">Cancel Registration</a></p>
+                <p>If your availability changes before the event, you can update your status here: <a href="${window.location + '&action=cancel'}" target="_blank" rel="noopener noreferrer">Cancel Registration</a></p>
                 <br>
                 <p>Best,
                 <br>
@@ -193,7 +185,7 @@ const RsvpPage = () => {
           </p>
           {regStatus === "confirmed" && (
             <p className="text-slate-500 mt-4">
-              We've sent you an email with full details.
+              We’ve sent you a confirmation email.
             </p>
           )}
         </div>
