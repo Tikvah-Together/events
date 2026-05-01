@@ -104,17 +104,11 @@ const RsvpPage = () => {
             html: `
               <div style="font-family: sans-serif; color: #334155;">
                 <p>Hi ${attendee.firstName},</p>
-                <p>You're confirmed for the upcoming SY SmartMatch event. We're looking forward to having you!</p>
+                <p>You're confirmed for the upcoming SY SmartMatch event.<br>We're looking forward to having you!</p>
                 <p>Full event details will be sent the day before the event.</p>
-                <p>Upon arrival, please check in at the front desk or scan the QR code on site.</p>
-                <p>You'll receive your starting table number and be guided where to sit.</p>
-                <p>Please bring your phone fully charged, as it will be used during the event.</p>
-                <p>Paper forms will also be available as an alternative.</p>
                 <p>If your availability changes before the event, you can update your status here: <a href="${window.location + '&action=cancel'}" target="_blank" rel="noopener noreferrer">Cancel Registration</a></p>
                 <br>
-                <p>Best,
-                <br>
-                SY SmartMatch Team</p>
+                <p>SY SmartMatch Team</p>
               </div>
             `,
           },
@@ -206,14 +200,14 @@ const RsvpPage = () => {
 
         <div className="space-y-4">
           <button
-            onClick={() => handleResponse("declined")}
+            onClick={() => handleResponse("confrimed")}
             className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-800 transition-colors shadow-lg"
           >
             Yes, cancel my invitation.
           </button>
 
           <button
-            onClick={() => handleResponse("confrimed")}
+            onClick={() => handleResponse("declined")}
             className="w-full bg-white border border-slate-200 text-slate-500 font-bold py-4 rounded-xl hover:bg-slate-50 transition-colors"
           >
             No, I can make it.
