@@ -503,7 +503,7 @@ export default function AdminDashboard() {
                 </a>
               </div>
             
-            <p>See you there,<br>SY SmartMatch Team</p>
+            <p>SY SmartMatch Team</p>
           </div>
         `,
         },
@@ -2118,7 +2118,7 @@ export default function AdminDashboard() {
                                           : "Remind [Final]"}
                                       </button>
                                     )}
-                                    {a.status === "confirmed" && (
+                                    {a.status !== "confirmed" && (
                                       <button
                                         onClick={() => {
                                           if (sentReminders.includes(a.userId))

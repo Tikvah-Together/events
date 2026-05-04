@@ -66,7 +66,7 @@ const RsvpPage = () => {
           setAttendee(userSnap.data());
           setEventData(eventSnap.data());
 
-          // Check if they already responded (using status from the registration doc)
+          // Check if they already responded (using status from the registration doc). Otherwise, they can keep confirming/declining and every time they confirm an email is sent...
           if ((regData.status === "confirmed" && action !== "cancel") || regData.status === "declined") {
             setStep("success");
           } else {
@@ -200,14 +200,14 @@ const RsvpPage = () => {
 
         <div className="space-y-4">
           <button
-            onClick={() => handleResponse("confrimed")}
+            onClick={() => handleResponse("declined")}
             className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-800 transition-colors shadow-lg"
           >
             Yes, cancel my invitation.
           </button>
 
           <button
-            onClick={() => handleResponse("declined")}
+            onClick={() => handleResponse("confirmed")}
             className="w-full bg-white border border-slate-200 text-slate-500 font-bold py-4 rounded-xl hover:bg-slate-50 transition-colors"
           >
             No, I can make it.
