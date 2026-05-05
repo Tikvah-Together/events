@@ -45,6 +45,7 @@ export default function AdminDashboard() {
   const [targetEventId, setTargetEventId] = useState(""); // For "Add to Event" dropdown
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
+  const [sentEventDetails, setSentEventDetails] = useState([]);
   const [sentReminders, setSentReminders] = useState([]);
   const INITIAL_FILTERS = {
     search: "",
@@ -477,6 +478,7 @@ export default function AdminDashboard() {
         `,
         },
       });
+      sentEventDetails((prev) => [...prev, userData.userId]);
       return true;
     } catch (err) {
       console.error("Error sending individual reminder:", err);
@@ -2118,10 +2120,10 @@ export default function AdminDashboard() {
                                           : "Remind [Final]"}
                                       </button>
                                     )}
-                                    {a.status !== "confirmed" && (
+                                    {a.status === "confirmed" && (
                                       <button
                                         onClick={() => {
-                                          if (sentReminders.includes(a.userId))
+                                          if (sentEventDetails.includes(a.userId))
                                             return; // Protection
 
                                           if (
@@ -2135,16 +2137,16 @@ export default function AdminDashboard() {
                                             );
                                           }
                                         }}
-                                        disabled={sentReminders.includes(a.userId)}
+                                        disabled={sentEventDetails.includes(a.userId)}
                                         className={`ml-2 text-xs font-medium transition-colors ${
-                                          sentReminders.includes(a.userId)
+                                          sentEventDetails.includes(a.userId)
                                             ? "text-green-600 cursor-default"
                                             : "text-blue-600 hover:text-blue-800 hover:underline"
                                         }`}
                                       >
-                                        {sentReminders.includes(a.userId)
+                                        {sentEventDetails.includes(a.userId)
                                           ? "✓ Sent"
-                                          : "Remind"}
+                                          : "Event Details"}
                                       </button>
                                     )}
                                   </td>

@@ -96,7 +96,7 @@ const RsvpPage = () => {
       });
 
       // 2. Trigger the Confirmation Email if they accepted
-      if (newStatus === "confirmed") {
+      if (newStatus === "confirmed" && action !== "cancel") {
         await addDoc(collection(db, "email"), {
           to: attendee.email,
           message: {
@@ -177,9 +177,14 @@ const RsvpPage = () => {
             Thank you, {attendee.firstName}. Your status is now:{" "}
             <strong>{regStatus}</strong>.
           </p>
-          {regStatus === "confirmed" && (
+          {regStatus === "confirmed" && action !== "cancel" && (
             <p className="text-slate-500 mt-4">
               We’ve sent you a confirmation email.
+            </p>
+          )}
+          {regStatus === "confirmed" && action === "cancel" && (
+            <p className="text-slate-500 mt-4">
+              You’re confirmed! We’re looking forward to having you!
             </p>
           )}
         </div>
