@@ -184,7 +184,7 @@ const RsvpPage = () => {
           )}
           {regStatus === "confirmed" && action === "cancel" && (
             <p className="text-slate-500 mt-4">
-              You’re confirmed! We’re looking forward to having you!
+              We’re looking forward to having you!
             </p>
           )}
         </div>
