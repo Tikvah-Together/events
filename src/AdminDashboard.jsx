@@ -478,7 +478,7 @@ export default function AdminDashboard() {
         `,
         },
       });
-      sentEventDetails((prev) => [...prev, userData.userId]);
+      setSentEventDetails((prev) => [...prev, userData.userId]);
       return true;
     } catch (err) {
       console.error("Error sending individual reminder:", err);
