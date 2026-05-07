@@ -2116,7 +2116,7 @@ export default function AdminDashboard() {
                                         }`}
                                       >
                                         {sentReminders.includes(a.userId)
-                                          ? "✓ Sent"
+                                          ? "✓ Reminder email sent"
                                           : "Remind [Final]"}
                                       </button>
                                     )}
@@ -2145,7 +2145,7 @@ export default function AdminDashboard() {
                                         }`}
                                       >
                                         {sentEventDetails.includes(a.userId)
-                                          ? "✓ Sent"
+                                          ? "✓ Event details email sent"
                                           : "Event Details"}
                                       </button>
                                     )}
