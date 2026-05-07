@@ -430,7 +430,7 @@ export default function AdminDashboard() {
         const regData = regDoc.data();
         const userSnap = await getDoc(doc(db, "users", regData.userId));
 
-        if (userSnap.exists()) {
+        if (userSnap.exists() && !sentEventDetails.includes(regData.userId)) {// do  not send again if they already got the event details email
           // We pass the user ID too for the cancel link
           return sendIndividualReminder(
             { ...userSnap.data(), userId: userSnap.id },
