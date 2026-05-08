@@ -420,6 +420,7 @@ export default function AdminDashboard() {
         where("status", "==", "confirmed"),
       );
       const regSnap = await getDocs(regQuery);
+      const numberOfSentReminders = 0;
 
       if (regSnap.empty) {
         alert("No confirmed participants found.");
@@ -431,16 +432,20 @@ export default function AdminDashboard() {
         const userSnap = await getDoc(doc(db, "users", regData.userId));
 
         if (userSnap.exists() && !sentEventDetails.includes(regData.userId)) {// do  not send again if they already got the event details email
-          // We pass the user ID too for the cancel link
+          numberOfSentReminders++;
           return sendIndividualReminder(
-            { ...userSnap.data(), userId: userSnap.id },
+            { ...userSnap.data(), userId: userSnap.id },// We pass the user ID too for the cancel link
             selectedEvent,
           );
         }
       });
 
       await Promise.all(emailPromises);
-      alert(`Successfully queued reminders for ${regSnap.size} participants!`);
+      if (numberOfSentReminders > 0) {
+      alert(`Successfully queued reminders for ${numberOfSentReminders} participants!`);
+      } else {
+        alert("No new reminders were sent. All confirmed participants have already received event details.");
+      }
     } catch (err) {
       console.error("Bulk send error:", err);
     }
