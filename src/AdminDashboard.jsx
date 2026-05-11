@@ -420,7 +420,7 @@ export default function AdminDashboard() {
         where("status", "==", "confirmed"),
       );
       const regSnap = await getDocs(regQuery);
-      const numberOfSentReminders = 0;
+      let numberOfSentReminders = 0; // Changed to let
 
       if (regSnap.empty) {
         alert("No confirmed participants found.");
@@ -429,22 +429,30 @@ export default function AdminDashboard() {
 
       const emailPromises = regSnap.docs.map(async (regDoc) => {
         const regData = regDoc.data();
-        const userSnap = await getDoc(doc(db, "users", regData.userId));
 
-        if (userSnap.exists() && !sentEventDetails.includes(regData.userId)) {// do  not send again if they already got the event details email
-          numberOfSentReminders++;
-          return sendIndividualReminder(
-            { ...userSnap.data(), userId: userSnap.id },// We pass the user ID too for the cancel link
-            selectedEvent,
-          );
+        // Do not auto-send to people who already have it during BULK
+        if (!sentEventDetails.includes(regData.userId)) {
+          const userSnap = await getDoc(doc(db, "users", regData.userId));
+          if (userSnap.exists()) {
+            numberOfSentReminders++;
+            return sendIndividualReminder(
+              { ...userSnap.data(), userId: userSnap.id },
+              selectedEvent,
+            );
+          }
         }
       });
 
       await Promise.all(emailPromises);
+
       if (numberOfSentReminders > 0) {
-      alert(`Successfully queued reminders for ${numberOfSentReminders} participants!`);
+        alert(
+          `Successfully queued reminders for ${numberOfSentReminders} participants!`,
+        );
       } else {
-        alert("No new reminders were sent. All confirmed participants have already received event details.");
+        alert(
+          "No new reminders were sent. Everyone has already received them.",
+        );
       }
     } catch (err) {
       console.error("Bulk send error:", err);
@@ -698,6 +706,48 @@ export default function AdminDashboard() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const syncEmailHistory = async () => {
+      if (!selectedEvent) return;
+
+      try {
+        // Query for both types of emails
+        const q = query(collection(db, "email"));
+        const querySnapshot = await getDocs(q);
+
+        const detailsSent = [];
+        const finalSent = [];
+
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          const subject = data.message?.subject;
+          const recipient = data.to;
+
+          // Find the attendee that matches this email to get their userId
+          const attendee = attendees.find((attr) => attr.email === recipient);
+          if (attendee) {
+            if (subject === "SY SmartMatch: Event Details & Reminder") {
+              detailsSent.push(attendee.userId);
+            } else if (
+              subject === "SY SmartMatch – Final Reminder to Confirm Your Spot"
+            ) {
+              finalSent.push(attendee.userId);
+            }
+          }
+        });
+
+        setSentEventDetails([...new Set(detailsSent)]);
+        setSentReminders([...new Set(finalSent)]);
+      } catch (err) {
+        console.error("Error syncing email history:", err);
+      }
+    };
+
+    if (attendees.length > 0) {
+      syncEmailHistory();
+    }
+  }, [selectedEvent, attendees.length]);
 
   useEffect(() => {
     // Fetch all users for the Master List
@@ -2096,62 +2146,58 @@ export default function AdminDashboard() {
                                         Invite
                                       </button>
                                     )}
-                                    {a.status !== "confirmed" && (
-                                      <button
-                                        onClick={() => {
-                                          // Prevent clicking if already sent
-                                          if (sentReminders.includes(a.id))
-                                            return;
-
-                                          if (
-                                            window.confirm(
-                                              `Send manual reminder to ${a.firstName} ${a.lastName}?`,
-                                            )
-                                          ) {
-                                            sendFinalReminder(a, selectedEvent);
-                                          }
-                                        }}
-                                        disabled={sentReminders.includes(
-                                          a.userId,
-                                        )}
-                                        className={`ml-2 text-xs transition-colors ${
-                                          sentReminders.includes(a.userId)
-                                            ? "text-green-600 cursor-default"
-                                            : "text-blue-600 hover:underline"
-                                        }`}
-                                      >
-                                        {sentReminders.includes(a.userId)
-                                          ? "✓ Reminder email sent"
-                                          : "Remind [Final]"}
-                                      </button>
-                                    )}
                                     {a.status === "confirmed" && (
                                       <button
                                         onClick={() => {
-                                          if (sentEventDetails.includes(a.userId))
-                                            return; // Protection
+                                          const alreadySent =
+                                            sentEventDetails.includes(a.userId);
+                                          const msg = alreadySent
+                                            ? `Event details were already sent to ${a.firstName} ${a.lastName}. Send again?`
+                                            : `Send event details to ${a.firstName} ${a.lastName}?`;
 
-                                          if (
-                                            window.confirm(
-                                              `Send event details to ${a.firstName} ${a.lastName}?`,
-                                            )
-                                          ) {
+                                          if (window.confirm(msg)) {
                                             sendIndividualReminder(
                                               a,
                                               selectedEvent,
                                             );
                                           }
                                         }}
-                                        disabled={sentEventDetails.includes(a.userId)}
+                                        // No longer disabled so the admin can click to resend
                                         className={`ml-2 text-xs font-medium transition-colors ${
                                           sentEventDetails.includes(a.userId)
-                                            ? "text-green-600 cursor-default"
+                                            ? "text-green-600 hover:text-green-700"
                                             : "text-blue-600 hover:text-blue-800 hover:underline"
                                         }`}
                                       >
                                         {sentEventDetails.includes(a.userId)
                                           ? "✓ Event details email sent"
                                           : "Event Details"}
+                                      </button>
+                                    )}
+
+                                    {/* Repeat similar logic for Final Reminder button */}
+                                    {a.status !== "confirmed" && (
+                                      <button
+                                        onClick={() => {
+                                          const alreadySent =
+                                            sentReminders.includes(a.userId);
+                                          const msg = alreadySent
+                                            ? `Final reminder was already sent to ${a.firstName}. Send again?`
+                                            : `Send manual reminder to ${a.firstName} ${a.lastName}?`;
+
+                                          if (window.confirm(msg)) {
+                                            sendFinalReminder(a, selectedEvent);
+                                          }
+                                        }}
+                                        className={`ml-2 text-xs transition-colors ${
+                                          sentReminders.includes(a.userId)
+                                            ? "text-green-600 hover:text-green-700"
+                                            : "text-blue-600 hover:underline"
+                                        }`}
+                                      >
+                                        {sentReminders.includes(a.userId)
+                                          ? "✓ Reminder email sent"
+                                          : "Remind [Final]"}
                                       </button>
                                     )}
                                   </td>
