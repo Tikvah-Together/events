@@ -2182,7 +2182,7 @@ export default function AdminDashboard() {
                                           const alreadySent =
                                             sentReminders.includes(a.userId);
                                           const msg = alreadySent
-                                            ? `Final reminder was already sent to ${a.firstName}. Send again?`
+                                            ? `Final reminder was already sent to ${a.firstName} ${a.lastName}. Send again?`
                                             : `Send manual reminder to ${a.firstName} ${a.lastName}?`;
 
                                           if (window.confirm(msg)) {
