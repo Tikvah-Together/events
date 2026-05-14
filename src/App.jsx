@@ -10,23 +10,23 @@ import RsvpPage from "./RSVP";
 function Home() {
   return (
     <div className="flex flex-col items-center justify-center pt-16 pb-12 px-4">
-      <h1 className="text-4xl md:text-6xl font-light text-slate-800 tracking-tight mb-4">
-        Tikvah <span className="font-semibold text-blue-900">Together</span>
+      <h1 className="text-4xl md:text-6xl font-light text-[#1E3D34] tracking-tight mb-4">
+        Tikvah <span className="font-semibold text-[#95B699]">Together</span>
       </h1>
-      <div className="w-20 h-1 bg-blue-900 mb-8"></div>
+      <div className="w-20 h-1 bg-[#95B699] mb-8"></div>
       <p className="text-xl text-slate-600 mb-12 max-w-2xl text-center leading-relaxed">
         Modern events for the Jewish community. Simple, organized, and
         meaningful.
       </p>
 
       {/* 3-Way Entry Points */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl">
+      <div className="grid grid-cols-1 md:grid-cols-1 gap-6 w-full max-w-4xl">
         {/* User Registration */}
         <Link
           to="/register"
           className="group flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-blue-900 hover:shadow-lg transition-all text-center"
         >
-          <div className="w-12 h-12 bg-blue-50 text-blue-900 rounded-full flex items-center justify-center mb-4 group-hover:bg-blue-900 group-hover:text-white transition-colors">
+          <div className="w-12 h-12 bg-blue-50 text-[#95B699] rounded-full flex items-center justify-center mb-4 group-hover:bg-[#95B699] group-hover:text-white transition-colors">
             <UserPlus size={24} />
           </div>
           <h3 className="font-bold text-lg text-slate-800">Registration</h3>
@@ -35,7 +35,7 @@ function Home() {
           </p>
         </Link>
 
-        {/* iPad / Gatekeeper Entry */}
+        {/* COMMENT OUT THIS ENTRY FOR NOW 
         <Link
           to="/event"
           className="group flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-orange-500 hover:shadow-lg transition-all text-center"
@@ -49,7 +49,7 @@ function Home() {
           </p>
         </Link>
 
-        {/* Admin Access */}
+        
         <Link
           to="/admin"
           className="group flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-slate-800 hover:shadow-lg transition-all text-center"
@@ -62,6 +62,7 @@ function Home() {
             Manage events and attendees
           </p>
         </Link>
+        */}
       </div>
     </div>
   );
@@ -75,11 +76,17 @@ function App() {
           <div className="max-w-6xl mx-auto px-6 flex justify-between items-center">
             <Link
               to="/"
-              className="text-2xl font-bold tracking-tighter text-slate-800"
+              className="flex flex-col hover:opacity-90 transition-opacity"
             >
-              TIKVAH
-              <span className="text-blue-900 text-sm align-top ml-1">●</span>
+              <div className="text-xl md:text-2xl font-bold tracking-tighter text-[#1E3D34] leading-none flex items-start">
+                SY SmartMatch
+              </div>
+              <span className="text-[10px] md:text-xs font-semibold text-[#1E3D34]/70 tracking-widest uppercase mt-1">
+                by Tikvah Together
+              </span>
             </Link>
+
+            {/* 
 
             <div className="flex space-x-4 md:space-x-8 text-[10px] md:text-xs uppercase tracking-widest font-bold text-slate-400">
               <Link
@@ -100,7 +107,11 @@ function App() {
               >
                 Admin
               </Link>
+              
+              
             </div>
+
+            */}
           </div>
         </nav>
 
@@ -108,10 +119,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/register" element={<RegistrationForm />} />
-            <Route
-              path="/event"
-              element={<Gatekeeper /> }
-            />
+            <Route path="/event" element={<Gatekeeper />} />
             <Route
               path="/admin"
               element={
@@ -126,8 +134,8 @@ function App() {
         </main>
 
         <footer className="py-8 border-t border-slate-200 text-center text-slate-400 text-sm shrink-0 bg-white">
-        © {new Date().getFullYear()} Tikvah Together.
-      </footer>
+          © {new Date().getFullYear()} Tikvah Together.
+        </footer>
       </div>
     </Router>
   );

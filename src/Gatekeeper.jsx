@@ -267,7 +267,7 @@ const groupGrids = useMemo(() => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
+      <div className="min-h-screen bg-[#1E3D34] flex flex-col items-center justify-center text-white">
         <Loader2 className="animate-spin mb-4" size={48} />
         <p className="text-slate-400 font-medium">Loading events...</p>
       </div>
@@ -290,7 +290,7 @@ const groupGrids = useMemo(() => {
             </div>
             <button
               onClick={() => setViewMode("user")}
-              className="bg-slate-900 text-white px-6 py-2 rounded-full font-bold text-sm"
+              className="bg-[#1E3D34] text-white px-6 py-2 rounded-full font-bold text-sm"
             >
               User View
             </button>
@@ -597,7 +597,7 @@ const groupGrids = useMemo(() => {
   // --- PHASE 1: LOGIN MODAL ---
   if (!myProfile) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-[#1E3D34] flex items-center justify-center p-6">
         <div className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-lg">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-black text-slate-900 mb-2">
@@ -639,19 +639,23 @@ const groupGrids = useMemo(() => {
 
             <button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white p-5 rounded-2xl font-bold text-xl shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-3 group"
+              className="w-full bg-[#1E3D34] hover:bg-[#95B699] text-white p-5 rounded-2xl font-bold text-xl shadow-lg shadow-[#1E3D34] transition-all flex items-center justify-center gap-3 group"
             >
               Verify & Start
               <ArrowRight className="group-hover:translate-x-1 transition-transform" />
             </button>
           </form>
 
+          {/* COMMENT OUT THIS BUTTON FOR NOW */}
+{/* 
           <button
             onClick={() => setViewMode("admin")}
             className="w-full mt-8 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-blue-600 transition-colors"
           >
             <ShieldCheck size={14} /> Admin Access
           </button>
+*/}
+          
         </div>
       </div>
     );

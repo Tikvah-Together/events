@@ -468,27 +468,25 @@ export default function AdminDashboard() {
         message: {
           subject: "SY SmartMatch: Event Details & Reminder",
           html: `
-          <div style="font-family: sans-serif; color: #334155; max-width: 600px;">
-            <p>Hi ${userData.firstName},</p>
-            <p>Looking forward to seeing you at the SY SmartMatch event.</p>
-            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
-              <p><strong>Event details:</strong></p>
-              <strong>Date:</strong> ${eventData.scheduledAt?.toDate().toLocaleDateString()}<br>
-              <strong>Time:</strong> ${eventData.scheduledAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}<br>
-              <strong>Location:</strong> ${eventData.fullAddress || eventData.generalLocation}
-            </div>
-            <p>Upon arrival, please check in at the front desk or scan the QR code on site.</p>
-            <p>You’ll receive your starting table number and be guided where to sit.</p>
-            <p>Please bring your phone fully charged, as it will be used during the event.</p>
-            <p>Paper forms will also be available as an alternative.</p>
-            <p>To ensure the best experience, please arrive on time, as late arrival may result in missing some of your curated dates.</p>
-            <p>We’ve carefully arranged the event based on confirmed attendees.</p>
-            
-            If anything changes and you’re no longer able to attend, please let us know here: <a href="${cancelUrl}" target="_blank" rel="noopener noreferrer">Cancel Registration</a></p>
-            
-            <p>SY SmartMatch Team</p>
-          </div>
-        `,
+      <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
+        <p>Hi ${userData.firstName},</p>
+        <p>Looking forward to seeing you at the SY SmartMatch event.</p>
+        <div style="background: #DEE8DF; padding: 20px; border-radius: 12px; border: 1px solid #95B699; margin: 20px 0;">
+          <p style="margin-top: 0;"><strong>Event details:</strong></p>
+          <strong>Date:</strong> ${eventData.scheduledAt?.toDate().toLocaleDateString()}<br>
+          <strong>Time:</strong> ${eventData.scheduledAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}<br>
+          <strong>Location:</strong> ${eventData.fullAddress || eventData.generalLocation}
+        </div>
+        <p>Upon arrival, please check in at the front desk or scan the QR code on site.</p>
+        <p>You’ll receive your starting table number and be guided where to sit.</p>
+        <p>Please bring your phone fully charged, as it will be used during the event.</p>
+        <p>To ensure the best experience, please arrive on time, as late arrival may result in missing some of your curated dates.</p>
+        
+        <p style="margin-top: 30px;">If anything changes: <a href="${cancelUrl}" style="color: #95B699; font-weight: bold;">Cancel Registration</a></p>
+        
+        <p style="font-weight: bold; color: #1E3D34;">SY SmartMatch Team</p>
+      </div>
+    `,
         },
       });
       setSentEventDetails((prev) => [...prev, userData.userId]);
@@ -507,20 +505,20 @@ export default function AdminDashboard() {
         message: {
           subject: "SY SmartMatch – Final Reminder to Confirm Your Spot",
           html: `
-          <div style="font-family: sans-serif; color: #334155; max-width: 600px;">
-            <p>Hi ${userData.firstName},</p>
-            <p>This is a final reminder to confirm your spot for the upcoming SY SmartMatch event.</p>
-            <p>We’ll be finalizing the list shortly, so please confirm as soon as possible if you’d like to attend.</p>
+      <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
+        <p>Hi ${userData.firstName},</p>
+        <p>This is a final reminder to confirm your spot for the upcoming SY SmartMatch event.</p>
+        <p>We’ll be finalizing the list shortly, so please confirm as soon as possible if you’d like to attend.</p>
 
-            <div style="margin: 30px 0;">
-                <a href="${confirmationURL}" style="background: #1e3a8a; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-                Confirm Your Spot
-                </a>
-              </div>
-            
-            <p>SY SmartMatch Team</p>
-          </div>
-        `,
+        <div style="margin: 40px 0; text-align: center;">
+            <a href="${confirmationURL}" style="background: #1E3D34; color: #DEE8DF; padding: 16px 32px; text-decoration: none; border-radius: 12px; font-weight: bold; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            Confirm Your Spot
+            </a>
+        </div>
+        
+        <p style="font-weight: bold; color: #1E3D34;">SY SmartMatch Team</p>
+      </div>
+    `,
         },
       });
       setSentReminders((prev) => [...prev, userData.userId]);
@@ -556,33 +554,27 @@ export default function AdminDashboard() {
           message: {
             subject: `SY SmartMatch - You're Invited`,
             html: `
-            <div style="font-family: sans-serif; text-align: center; max-width: 500px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 15px;">
-              <h2 style="color: #1e3a8a;">Hi ${a.firstName}!</h2>
-              <p>We're excited to invite you to SY SmartMatch.</p>
+      <div style="font-family: sans-serif; text-align: center; max-width: 500px; margin: auto; border: 2px solid #95B699; padding: 30px; border-radius: 20px; background-color: #ffffff;">
+        <h2 style="color: #1E3D34; font-size: 24px;">Hi ${a.firstName}!</h2>
+        <p style="color: #1E3D34;">We're excited to invite you to <strong>SY SmartMatch</strong>.</p>
 
-              <p>
-              <strong>Event Details:</strong>
-              <br>
-              Date: ${selectedEvent?.scheduledAt?.toDate().toLocaleDateString() || "TBA"}
-              <br>
-              Time: ${selectedEvent?.scheduledAt?.toDate().toLocaleTimeString() || "TBA"}
-              <br>
-              Location: ${selectedEvent?.generalLocation || "TBA"}
-              </p>
-              
-              <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
-                Please confirm your spot within 3 days to secure your place.
-              </p>
-              <p>Full event details will be sent the day before the event.</p>
-              
-              <p>Please click the button below to respond:</p>
-              <a href="${fullUrl}" style="display: inline-block; background: #1e3a8a; color: white; padding: 12px 25px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-                View Invitation & confirm your spot
-              </a>
-              <br>
-              <p>SY SmartMatch Team</p>
-            </div>
-          `,
+        <div style="background: #DEE8DF; padding: 15px; border-radius: 10px; margin: 20px 0; color: #1E3D34; text-align: left;">
+          <strong>Event Details:</strong><br>
+          Date: ${selectedEvent?.scheduledAt?.toDate().toLocaleDateString() || "TBA"}<br>
+          Time: ${selectedEvent?.scheduledAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) || "TBA"}<br>
+          Location: ${selectedEvent?.generalLocation || "TBA"}
+        </div>
+        
+        <p style="font-size: 13px; color: #95B699; font-weight: bold;">
+          Please confirm your spot within 3 days to secure your place.
+        </p>
+        
+        <a href="${fullUrl}" style="display: inline-block; background: #1E3D34; color: #DEE8DF; padding: 14px 28px; text-decoration: none; border-radius: 10px; font-weight: bold; margin-top: 15px;">
+          View Invitation & Confirm
+        </a>
+        <p style="margin-top: 25px; font-weight: bold; color: #1E3D34;">SY SmartMatch Team</p>
+      </div>
+    `,
           },
         });
 
@@ -1038,25 +1030,25 @@ export default function AdminDashboard() {
   }, [filteredMasterList, filteredAttendees, activeTab]);
 
   return (
-    <div className="flex flex-col bg-slate-50">
+    <div className="flex flex-col bg-transparent">
       {/* TAB NAVIGATION */}
       <div className="flex bg-white border-b border-slate-200 px-6 shrink-0">
         <button
           onClick={() => setActiveTab("events")}
-          className={`px-6 py-4 font-bold text-sm ${activeTab === "events" ? "border-b-2 border-blue-900 text-blue-900" : "text-slate-400"}`}
+          className={`px-6 py-4 font-bold text-sm ${activeTab === "events" ? "border-b-2 border-[#1E3D34] text-[#1E3D34]" : "text-slate-400"}`}
         >
           Events Management
         </button>
         <button
           onClick={() => setActiveTab("master")}
-          className={`px-6 py-4 font-bold text-sm ${activeTab === "master" ? "border-b-2 border-blue-900 text-blue-900" : "text-slate-400"}`}
+          className={`px-6 py-4 font-bold text-sm ${activeTab === "master" ? "border-b-2 border-[#1E3D34] text-[#1E3D34]" : "text-slate-400"}`}
         >
           Master Singles List
         </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex flex-col md:flex-row h-screen bg-slate-50 overflow-hidden">
+        <div className="flex flex-col md:flex-row h-screen bg-transparent overflow-hidden">
           {/* SIDEBAR: Event List */}
           {activeTab === "events" && (
             <div
@@ -1064,7 +1056,7 @@ export default function AdminDashboard() {
                 selectedEvent ? "hidden md:flex" : "flex"
               } w-full md:w-auto max-w-xs bg-white border-r border-slate-200 p-6 flex-col h-full`}
             >
-              <h2 className="text-xl font-bold text-blue-900 mb-6">
+              <h2 className="text-xl font-bold text-[#1E3D34] mb-6">
                 Events Management
               </h2>
 
@@ -1131,7 +1123,7 @@ export default function AdminDashboard() {
                 </div>
                 <button
                   onClick={createEvent}
-                  className="w-full bg-blue-900 text-white py-2 rounded font-semibold flex items-center justify-center gap-2 hover:bg-blue-800 transition shadow-sm"
+                  className="w-full bg-[#1E3D34] text-white py-2 rounded font-semibold flex items-center justify-center gap-2 hover:bg-[#95B699] transition shadow-sm"
                 >
                   <Plus size={18} /> Create Event
                 </button>
@@ -1147,8 +1139,8 @@ export default function AdminDashboard() {
                     onClick={() => setSelectedEvent(ev)}
                     className={`p-3 rounded-lg cursor-pointer transition-all border ${
                       selectedEvent?.id === ev.id
-                        ? "bg-blue-50 border-blue-200"
-                        : "bg-white border-transparent hover:bg-slate-50"
+                        ? "bg-[#95B699]/30 border-blue-200"
+                        : "bg-white border-transparent hover:bg-transparent"
                     }`}
                   >
                     <div className="flex justify-between items-start">
@@ -1199,7 +1191,7 @@ export default function AdminDashboard() {
                       <div className="mt-3 flex flex-wrap md:flex-nowrap items-center gap-2 w-full md:w-auto group">
                         <div
                           onClick={() => copyRegistrationLink(selectedEvent.id)}
-                          className="flex items-center gap-2 px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-100 cursor-pointer hover:bg-blue-100 transition-all shadow-sm"
+                          className="flex items-center gap-2 px-2 py-1 bg-[#95B699]/30 text-blue-700 rounded border border-blue-100 cursor-pointer hover:bg-blue-100 transition-all shadow-sm"
                         >
                           <span className="text-[10px] font-bold uppercase tracking-tight">
                             Registration Link:
@@ -1295,7 +1287,7 @@ export default function AdminDashboard() {
                                   alert("Error adding group.");
                                 }
                               }}
-                              className="flex items-center gap-2 text-xs bg-blue-900 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-800 transition-all shadow-sm h-10"
+                              className="flex items-center gap-2 text-xs bg-[#1E3D34] text-white px-4 py-2 rounded-lg font-bold hover:bg-[#95B699] transition-all shadow-sm h-10"
                             >
                               <Plus size={14} />
                               Add Group
@@ -1380,7 +1372,7 @@ export default function AdminDashboard() {
                       {/* Reminder Button */}
                       <button
                         onClick={sendBulkReminders}
-                        className="px-4 py-2 bg-white text-blue-900 border border-blue-900 rounded-md font-bold flex items-center gap-2 hover:bg-blue-50 transition-all duration-200 shadow-sm"
+                        className="px-4 py-2 bg-white text-[#1E3D34] border border-[#1E3D34] rounded-md font-bold flex items-center gap-2 hover:bg-[#95B699]/30 transition-all duration-200 shadow-sm"
                         title="Send Reminders"
                       >
                         <Bell size={16} /> Remind All
@@ -1392,7 +1384,7 @@ export default function AdminDashboard() {
                         className={`px-6 py-2 rounded-md font-bold flex items-center gap-2 transition-all duration-200 shadow-sm border ${
                           selectedEvent.active
                             ? "bg-white text-orange-600 border-orange-200 hover:bg-orange-50"
-                            : "bg-blue-900 text-white border-blue-900 hover:bg-blue-800"
+                            : "bg-[#1E3D34] text-white border-[#1E3D34] hover:bg-[#95B699]"
                         }`}
                       >
                         {selectedEvent.active ? (
@@ -1449,7 +1441,7 @@ export default function AdminDashboard() {
                         Hashgafa Group
                       </label>
                       <select
-                        className="w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50"
+                        className="w-full p-2.5 border border-slate-200 rounded-lg text-sm bg-transparent"
                         value={filters.hashgafa}
                         onChange={(e) =>
                           setFilters({ ...filters, hashgafa: e.target.value })
@@ -1592,7 +1584,7 @@ export default function AdminDashboard() {
 
                   {/* ADVANCED FILTERS (Collapsible) */}
                   {isAdvancedOpen && (
-                    <div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-slate-50/50 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                    <div className="px-6 pb-6 pt-2 border-t border-slate-100 bg-transparent/50 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
                       {/* Gender */}
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">
@@ -1740,7 +1732,7 @@ export default function AdminDashboard() {
                     </div>
                   )}
                   {activeTab === "master" && (
-                    <div className="bg-blue-500 text-white p-4 rounded flex items-center justify-between">
+                    <div className="bg-[#95B699]/300 text-white p-4 rounded flex items-center justify-between">
                       <span className="font-bold">
                         {selectedUserIds.length} user(s) selected
                       </span>
@@ -1798,7 +1790,7 @@ export default function AdminDashboard() {
                       ([groupId, groupData]) => (
                         <div
                           key={groupId}
-                          className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-200 flex items-center gap-4"
+                          className="bg-transparent px-4 py-3 rounded-xl border border-slate-200 flex items-center gap-4"
                         >
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                             Group {groupId}
@@ -1823,7 +1815,7 @@ export default function AdminDashboard() {
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm min-w-450">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
+                      <thead className="bg-transparent border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
                         <tr>
                           {activeTab === "master" && (
                             <th className="px-6 py-4">
@@ -1877,7 +1869,7 @@ export default function AdminDashboard() {
                               />
                             </th>
                           )}
-                          <th className="px-6 py-4 sticky left-0 bg-slate-50 z-20">
+                          <th className="px-6 py-4 sticky left-0 bg-transparent z-20">
                             Name / Age
                           </th>
                           <th className="px-6 py-4">Hashgafa</th>
@@ -1920,7 +1912,7 @@ export default function AdminDashboard() {
                           </th>
                           <th className="px-6 py-4">Dress Style (Female)</th>
                           <th className="px-6 py-4">Anything else</th>
-                          <th className="px-6 py-4 text-right sticky right-0 bg-slate-50">
+                          <th className="px-6 py-4 text-right sticky right-0 bg-transparent">
                             Actions
                           </th>
                         </tr>
@@ -2036,7 +2028,7 @@ export default function AdminDashboard() {
                                 } ${
                                   isAlreadyInEvent
                                     ? "bg-slate-200/70"
-                                    : "hover:bg-blue-50"
+                                    : "hover:bg-[#95B699]/30"
                                 }`}
                               >
                                 {activeTab === "master" && (
@@ -2068,7 +2060,7 @@ export default function AdminDashboard() {
 
                                 {/* Permanent Name Column */}
                                 <td
-                                  className={`px-6 py-4 sticky left-0 z-10 border-r border-slate-100 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-blue-50"}`}
+                                  className={`px-6 py-4 sticky left-0 z-10 border-r border-slate-100 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-[#95B699]/30"}`}
                                 >
                                   <p className="font-bold text-slate-900">
                                     {a.firstName} {a.lastName}
@@ -2128,7 +2120,7 @@ export default function AdminDashboard() {
                                           ? "bg-green-100 text-green-900 border-green-300"
                                           : a.status === "declined"
                                             ? "bg-red-100 text-red-900 border-red-300"
-                                            : "bg-white text-blue-900 border-gray-300"
+                                            : "bg-white text-[#1E3D34] border-gray-300"
                                       }`}
                                     >
                                       <option value="pending invite">
@@ -2242,7 +2234,7 @@ export default function AdminDashboard() {
                                           e.target.value,
                                         )
                                       }
-                                      className="text-xs font-bold text-blue-900 bg-white border border-slate-200 rounded p-1 outline-none focus:ring-2 focus:ring-blue-500"
+                                      className="text-xs font-bold text-[#1E3D34] bg-white border border-slate-200 rounded p-1 outline-none focus:ring-2 focus:ring-blue-500"
                                     >
                                       <option value="">Unassigned</option>
                                       {(selectedEvent?.eventGroups || []).map(
@@ -2545,7 +2537,7 @@ export default function AdminDashboard() {
 
                                 {/* Actions */}
                                 <td
-                                  className={`px-6 py-4 text-right sticky right-0 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-blue-50"}`}
+                                  className={`px-6 py-4 text-right sticky right-0 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-[#95B699]/30"}`}
                                 >
                                   <button
                                     onClick={() =>

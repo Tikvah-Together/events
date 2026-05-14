@@ -170,7 +170,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
   // --- 3. MATH & STOP LOGIC ---
   const startTime = event.startTime.toDate();
   // If paused, we calculate time based on when the pause started
-// If not paused, we use the current time (now)
+  // If not paused, we use the current time (now)
   const effectiveNow = event.isPaused ? event.pausedAt.toDate() : now;
   const secondsSinceStart = Math.floor((effectiveNow - startTime) / 1000);
   const prepBuffer = 60; // 1 minute buffer at the start before any rounds begin to allow people to find their tables and get settled
@@ -239,40 +239,41 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     setDecisionMade(false);
   }, [currentRound]);
 
-// --- 5. PARTNER MATCHING ---
-const matchedAttendee = attendees.find((a) => {
-  const attendeeUser = users.find((u) => u.id === a.userId);
-  
-  // Safety check: If for some reason the user ID in attendees 
-  // doesn't exist in the master users list, skip them.
-  if (!attendeeUser) return false;
+  // --- 5. PARTNER MATCHING ---
+  const matchedAttendee = attendees.find((a) => {
+    const attendeeUser = users.find((u) => u.id === a.userId);
 
-  // 1. Gender check
-  if (attendeeUser.gender === user.gender) return false;
+    // Safety check: If for some reason the user ID in attendees
+    // doesn't exist in the master users list, skip them.
+    if (!attendeeUser) return false;
 
-  // 2. Group check
-  const pTableString = a.tableNumber || "";
-  if (!pTableString.toLowerCase().includes(`- ${groupName.toLowerCase()}`))
-    return false;
+    // 1. Gender check
+    if (attendeeUser.gender === user.gender) return false;
 
-  // 3. Table Calculation
-  const pTablePart = pTableString.split(" - ")[0] || "Table 1";
-  const pStartNum = parseInt(pTablePart.replace("Table ", ""), 10) || 1;
-  let pCurrentNum = pStartNum;
+    // 2. Group check
+    const pTableString = a.tableNumber || "";
+    if (!pTableString.toLowerCase().includes(`- ${groupName.toLowerCase()}`))
+      return false;
 
-  if (attendeeUser.gender === "man") {
-    pCurrentNum = ((pStartNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
-  }
+    // 3. Table Calculation
+    const pTablePart = pTableString.split(" - ")[0] || "Table 1";
+    const pStartNum = parseInt(pTablePart.replace("Table ", ""), 10) || 1;
+    let pCurrentNum = pStartNum;
 
-  // 4. Comparison
-  return pCurrentNum === activeNum;
-});
+    if (attendeeUser.gender === "man") {
+      pCurrentNum =
+        ((pStartNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
+    }
 
-// Use optional chaining so partnerId is simply undefined if no match is found
-const partnerId = matchedAttendee?.userId; 
-console.log("Calculated partner ID:", partnerId);
+    // 4. Comparison
+    return pCurrentNum === activeNum;
+  });
 
-const partner = partnerId ? users.find((u) => u.id === partnerId) : null;
+  // Use optional chaining so partnerId is simply undefined if no match is found
+  const partnerId = matchedAttendee?.userId;
+  console.log("Calculated partner ID:", partnerId);
+
+  const partner = partnerId ? users.find((u) => u.id === partnerId) : null;
 
   // Check if this partner meets our criteria
   const isMatch = partner ? checkCompatibility(user, partner) : true;
@@ -299,74 +300,74 @@ const partner = partnerId ? users.find((u) => u.id === partnerId) : null;
     //   alert("Please enter the correct table number.");
     //   return;
     // }
-  if (pendingSelection === "no") {
-    setDecisionMade(true);
-    return;
-  }
-
-  const myRef = doc(db, "users", user.id);
-  const newEntry = {
-    event: event.id,
-    partnerId: partner.id,
-    partnerName: `${partner.firstName} ${partner.lastName}`,
-    interested: pendingSelection,
-    isPriority: isPriority,
-    tableNumber: activeRoundTable,
-    round: currentRound,
-    optionalNotes: optionalNotes,
-    timestamp: new Date(),
-  };
-
-  try {
-    // 1. Get existing feedback or default to empty array
-    let currentFeedback = user.feedbackData || [];
-
-    // 2. Clear existing priority for this event if the new entry is priority
-    if (isPriority) {
-      currentFeedback = currentFeedback.map((f) =>
-        f.event === event.id ? { ...f, priority: false } : f
-      );
+    if (pendingSelection === "no") {
+      setDecisionMade(true);
+      return;
     }
 
-    // 3. Find if an entry for this partner already exists in this event
-    const existingIndex = currentFeedback.findIndex(
-      (f) => f.event === event.id && f.partnerId === partner.id
-    );
-
-    let finalFeedback;
-    if (existingIndex > -1) {
-      // UPDATE: Replace the existing entry with the new one
-      finalFeedback = [...currentFeedback];
-      finalFeedback[existingIndex] = newEntry;
-    } else {
-      // ADD: Append the new entry
-      finalFeedback = [...currentFeedback, newEntry];
-    }
-
-    // 4. Prepare the payload
-    const updatePayload = {
-      feedbackData: finalFeedback
+    const myRef = doc(db, "users", user.id);
+    const newEntry = {
+      event: event.id,
+      partnerId: partner.id,
+      partnerName: `${partner.firstName} ${partner.lastName}`,
+      interested: pendingSelection,
+      isPriority: isPriority,
+      tableNumber: activeRoundTable,
+      round: currentRound,
+      optionalNotes: optionalNotes,
+      timestamp: new Date(),
     };
-    
+
+    try {
+      // 1. Get existing feedback or default to empty array
+      let currentFeedback = user.feedbackData || [];
+
+      // 2. Clear existing priority for this event if the new entry is priority
+      if (isPriority) {
+        currentFeedback = currentFeedback.map((f) =>
+          f.event === event.id ? { ...f, priority: false } : f,
+        );
+      }
+
+      // 3. Find if an entry for this partner already exists in this event
+      const existingIndex = currentFeedback.findIndex(
+        (f) => f.event === event.id && f.partnerId === partner.id,
+      );
+
+      let finalFeedback;
+      if (existingIndex > -1) {
+        // UPDATE: Replace the existing entry with the new one
+        finalFeedback = [...currentFeedback];
+        finalFeedback[existingIndex] = newEntry;
+      } else {
+        // ADD: Append the new entry
+        finalFeedback = [...currentFeedback, newEntry];
+      }
+
+      // 4. Prepare the payload
+      const updatePayload = {
+        feedbackData: finalFeedback,
+      };
+
       // if (pendingSelection === "yes")
       //   updatePayload.selections = arrayUnion(partner.id);
       // if (pendingSelection === "maybe")
       //   updatePayload.maybeSelections = arrayUnion(partner.id);
-    if (emailInput) updatePayload.email = emailInput;
+      if (emailInput) updatePayload.email = emailInput;
 
-    // 5. Save to Firestore
-    await updateDoc(myRef, updatePayload);
+      // 5. Save to Firestore
+      await updateDoc(myRef, updatePayload);
 
-    // Reset local UI states
-    setDecisionMade(true);
-    setPendingSelection(null);
-    setOptionalNotes("");
-    setIsPriority(false);
-  } catch (err) {
-    console.error("Error saving feedback:", err);
-    alert("Check your internet connection; feedback didn't save.");
-  }
-};
+      // Reset local UI states
+      setDecisionMade(true);
+      setPendingSelection(null);
+      setOptionalNotes("");
+      setIsPriority(false);
+    } catch (err) {
+      console.error("Error saving feedback:", err);
+      alert("Check your internet connection; feedback didn't save.");
+    }
+  };
 
   // --- UI COMPONENTS ---
   // --- 4. THE RENDERER ---
@@ -458,22 +459,25 @@ const partner = partnerId ? users.find((u) => u.id === partnerId) : null;
     }
 
     if (event.isPaused) {
-  return (
-    <div className="flex flex-col items-center justify-center p-10 text-center">
-      <div className="relative">
-        <Coffee size={120} className="text-yellow-500 mb-8 animate-bounce" />
-        <div className="absolute top-0 right-0 bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold">
-          PAUSED
+      return (
+        <div className="flex flex-col items-center justify-center p-10 text-center">
+          <div className="relative">
+            <Coffee
+              size={120}
+              className="text-yellow-500 mb-8 animate-bounce"
+            />
+            <div className="absolute top-0 right-0 bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold">
+              PAUSED
+            </div>
+          </div>
+          <h1 className="text-5xl font-black mb-4">Event Paused</h1>
+          <p className="text-2xl text-slate-400">
+            The organizer has temporarily paused the event. <br />
+            Grab a drink—we'll be back shortly!
+          </p>
         </div>
-      </div>
-      <h1 className="text-5xl font-black mb-4">Event Paused</h1>
-      <p className="text-2xl text-slate-400">
-        The organizer has temporarily paused the event. <br />
-        Grab a drink—we'll be back shortly!
-      </p>
-    </div>
-  );
-}
+      );
+    }
 
     // E. ACTIVE DATING OR BREAK PHASE
     if (!partner || !isMatch) {
@@ -549,7 +553,11 @@ const partner = partnerId ? users.find((u) => u.id === partnerId) : null;
         {/* Interest Buttons */}
         <button
           onClick={() => setPendingSelection("yes")}
-          className={`py-6 rounded-2xl text-3xl font-black transition-colors ${pendingSelection === "yes" ? "bg-green-600 text-white" : "bg-white text-green-600"}`}
+          className={`py-6 rounded-2xl text-3xl font-black border-2 transition-all ${
+            pendingSelection === "yes"
+              ? "bg-[#95B699] border-[#1E3D34] text-[#1E3D34]"
+              : "bg-white border-transparent text-[#1E3D34]"
+          }`}
         >
           Interested
         </button>
@@ -566,14 +574,22 @@ const partner = partnerId ? users.find((u) => u.id === partnerId) : null;
 
         <button
           onClick={() => setPendingSelection("maybe")}
-          className={`py-6 rounded-2xl text-3xl font-black transition-colors ${pendingSelection === "maybe" ? "bg-blue-600 text-white" : "bg-white text-blue-600"}`}
+          className={`py-6 rounded-2xl text-3xl font-black border-2 transition-all ${
+            pendingSelection === "maybe"
+              ? "bg-[#95B699] border-[#1E3D34] text-[#1E3D34]"
+              : "bg-white border-transparent text-[#1E3D34]"
+          }`}
         >
           Maybe
         </button>
 
         <button
           onClick={() => setPendingSelection("no")}
-          className={`py-4 rounded-2xl text-xl font-bold transition-colors ${pendingSelection === "no" ? "bg-orange-900 text-orange-200" : "bg-slate-800 text-slate-400"}`}
+          className={`py-4 rounded-2xl text-xl font-bold border-2 transition-all ${
+            pendingSelection === "no"
+              ? "bg-[#95B699] border-[#1E3D34] text-[#1E3D34]"
+              : "bg-white border-transparent text-[#1E3D34]"
+          }`}
         >
           No thanks
         </button>

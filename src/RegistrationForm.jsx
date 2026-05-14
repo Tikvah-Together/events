@@ -203,18 +203,20 @@ export default function RegistrationForm() {
         message: {
           subject: `SY SmartMatch - Registration Received`,
           html: `
-      <div style="font-family: sans-serif; color: #334155;">
-        <h1 style="color: #0f172a;">Hi ${formData.firstName}!</h1>
+      <div style="font-family: sans-serif; color: #1E3D34; padding: 20px;">
+        <h1 style="color: #1E3D34; border-bottom: 2px solid #95B699; display: inline-block; padding-bottom: 5px;">Hi ${formData.firstName}!</h1>
         <p>Thank you for registering for SY SmartMatch.</p>
-        <p>Your registration has been received and is currently being reviewed to help create the best possible matches. We'll be in touch with event details and next steps.</p>
+        <p>Your registration has been received and is currently being reviewed. We'll be in touch with next steps soon!</p>
         <br>
-        <p>SY SmartMatch Team</p>
+        <p style="font-weight: bold;">SY SmartMatch Team</p>
       </div>
     `,
         },
       });
 
-      alert("Thank you! Your registration has been received.\nYou’ll receive a confirmation email shortly.");
+      alert(
+        "Thank you! Your registration has been received.\nYou’ll receive a confirmation email shortly.",
+      );
       window.location.reload();
     } catch (err) {
       console.error("Registration Error:", err);
@@ -403,8 +405,8 @@ export default function RegistrationForm() {
                       onClick={() => handleEthnicityToggle(opt)}
                       className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
                         isSelected(opt)
-                          ? "border-pink-500 bg-pink-50 text-pink-600"
-                          : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+                          ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
+                          : "border-white bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                       }`}
                     >
                       {opt}
@@ -417,10 +419,10 @@ export default function RegistrationForm() {
                   <button
                     type="button"
                     onClick={() => handleEthnicityToggle("Other Sephardic")}
-                    className={`w-full px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all text-left ${
+                    className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
                       isSelected("Other Sephardic")
-                        ? "border-pink-500 bg-pink-50 text-pink-600"
-                        : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+                        ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
+                        : "border-white bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                     }`}
                   >
                     Other Sephardic {isSelected("Other Sephardic") ? ":" : ""}
@@ -449,10 +451,10 @@ export default function RegistrationForm() {
                 <button
                   type="button"
                   onClick={() => handleEthnicityToggle("Ashkenaz")}
-                  className={`w-full px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all text-left ${
+                  className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
                     isSelected("Ashkenaz")
-                      ? "border-pink-500 bg-pink-50 text-pink-600"
-                      : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+                      ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
+                      : "border-white bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                   }`}
                 >
                   Ashkenaz
@@ -462,10 +464,10 @@ export default function RegistrationForm() {
                 <button
                   type="button"
                   onClick={() => handleEthnicityToggle("Other")}
-                  className={`w-full px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all text-left ${
+                  className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
                     isSelected("Other")
-                      ? "border-pink-500 bg-pink-50 text-pink-600"
-                      : "border-white bg-white text-slate-500 shadow-sm hover:border-slate-200"
+                      ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
+                      : "border-white bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                   }`}
                 >
                   Other {isSelected("Other") ? ":" : ""}
@@ -718,7 +720,7 @@ export default function RegistrationForm() {
           <button
             disabled={loading}
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-colors shadow-lg"
+            className="w-full bg-[#1E3D34] hover:bg-[#1E3D34]/90 text-white font-bold py-4 rounded-xl transition-colors shadow-lg"
           >
             {loading ? "Saving..." : "Register for Event"}
           </button>

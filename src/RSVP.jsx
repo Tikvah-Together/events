@@ -67,7 +67,10 @@ const RsvpPage = () => {
           setEventData(eventSnap.data());
 
           // Check if they already responded (using status from the registration doc). Otherwise, they can keep confirming/declining and every time they confirm an email is sent...
-          if ((regData.status === "confirmed" && action !== "cancel") || regData.status === "declined") {
+          if (
+            (regData.status === "confirmed" && action !== "cancel") ||
+            regData.status === "declined"
+          ) {
             setStep("success");
           } else {
             setStep("decision");
@@ -92,7 +95,7 @@ const RsvpPage = () => {
     try {
       // 1. Update the 'registrations' document using the ID we found earlier
       await updateDoc(doc(db, "registrations", registrationId), {
-        status: newStatus
+        status: newStatus,
       });
 
       // 2. Trigger the Confirmation Email if they accepted
@@ -102,15 +105,17 @@ const RsvpPage = () => {
           message: {
             subject: "SY SmartMatch - You're Confirmed",
             html: `
-              <div style="font-family: sans-serif; color: #334155;">
-                <p>Hi ${attendee.firstName},</p>
-                <p>You're confirmed for the upcoming SY SmartMatch event.<br>We're looking forward to having you!</p>
-                <p>Full event details will be sent the day before the event.</p>
-                <p>If your availability changes before the event, you can update your status here: <a href="${window.location + '&action=cancel'}" target="_blank" rel="noopener noreferrer">Cancel Registration</a></p>
-                <br>
-                <p>SY SmartMatch Team</p>
-              </div>
-            `,
+      <div style="font-family: sans-serif; color: #1E3D34;">
+        <p>Hi ${attendee.firstName},</p>
+        <p>You're <strong>confirmed</strong> for the upcoming SY SmartMatch event.<br>We're looking forward to having you!</p>
+        <p>Full event details will be sent the day before the event.</p>
+        <p style="margin-top: 20px; font-size: 13px;">
+          If your availability changes before the event, you can update your status here: <a href="${window.location + "&action=cancel"}" style="color: #95B699; font-weight: bold;">Cancel Registration</a>
+        </p>
+        <br>
+        <p style="font-weight: bold;">SY SmartMatch Team</p>
+      </div>
+    `,
           },
         });
       }
@@ -193,34 +198,34 @@ const RsvpPage = () => {
   }
 
   if (action === "cancel") {
-     return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">
-          Cancel Invitation?
-        </h2>
-        <p className="text-slate-500 mb-8">
-          Hi {attendee?.firstName}, would you like to cancel your invitation?
-        </p>
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">
+            Cancel Invitation?
+          </h2>
+          <p className="text-slate-500 mb-8">
+            Hi {attendee?.firstName}, would you like to cancel your invitation?
+          </p>
 
-        <div className="space-y-4">
-          <button
-            onClick={() => handleResponse("declined")}
-            className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-800 transition-colors shadow-lg"
-          >
-            Yes, cancel my invitation.
-          </button>
+          <div className="space-y-4">
+            <button
+              onClick={() => handleResponse("declined")}
+              className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-800 transition-colors shadow-lg"
+            >
+              Yes, cancel my invitation.
+            </button>
 
-          <button
-            onClick={() => handleResponse("confirmed")}
-            className="w-full bg-white border border-slate-200 text-slate-500 font-bold py-4 rounded-xl hover:bg-slate-50 transition-colors"
-          >
-            No, I can make it.
-          </button>
+            <button
+              onClick={() => handleResponse("confirmed")}
+              className="w-full bg-white border border-slate-200 text-slate-500 font-bold py-4 rounded-xl hover:bg-slate-50 transition-colors"
+            >
+              No, I can make it.
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
   }
 
   return (
