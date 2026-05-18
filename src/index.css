@@ -6,3 +6,14 @@ margin: 0;
   color: #1E3D34;
   font-family: sans-serif;
 }
+
+::selection {
+  background-color: #1E3D34; /* Your corporate dark green */
+  color: #DEE8DF;            /* Your light green brand color for the text */
+}
+
+/* Ensures Safari/iOS webview respects it perfectly */
+::-moz-selection {
+  background-color: #1E3D34;
+  color: #DEE8DF;
+}

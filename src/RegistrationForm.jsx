@@ -226,24 +226,25 @@ export default function RegistrationForm() {
   };
 
   return (
-    <div className="min-h-screen bg-white py-12 px-4">
-      <div className="max-w-xl mx-auto">
-        <h2 className="text-3xl font-bold text-slate-800 mb-8 text-center">
+    <div className="min-h-screen bg-[#DEE8DF] py-12 px-4 text-[#1E3D34]">
+      {/* Container Background changed from bg-white to bg-[#DEE8DF] to seamlessly carry the theme color inside */}
+      <div className="max-w-xl mx-auto bg-[#DEE8DF] p-6 sm:p-10 rounded-2xl border border-[#95B699] shadow-sm">
+        <h2 className="text-3xl font-bold text-[#1E3D34] mb-8 text-center">
           Event Registration
         </h2>
 
         {/* Conditional UI: Show name if ID is in URL, otherwise show nothing */}
         {urlEventId ? (
-          <p className="text-center text-blue-600 font-medium mb-8">
+          <p className="text-center text-[#1E3D34] font-bold mb-8">
             Registering for: {selectedEventName || "Loading event..."}
           </p>
         ) : (
           <div className="mb-8">
-            <label className="block font-semibold mb-2 text-center text-slate-600">
+            <label className="block font-semibold mb-2 text-center text-[#1E3D34]">
               Select Event
             </label>
             <select
-              className="w-full p-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-3 border border-[#95B699] rounded-lg shadow-sm focus:ring-2 focus:ring-[#95B699] bg-white outline-none text-[#1E3D34]"
               value={formData.eventId}
               onChange={(e) =>
                 setFormData({ ...formData, eventId: e.target.value })
@@ -270,7 +271,7 @@ export default function RegistrationForm() {
                 type="text"
                 placeholder="First name"
                 required
-                className="p-3 border rounded-lg"
+                className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
                 onChange={(e) =>
                   setFormData({ ...formData, firstName: e.target.value })
                 }
@@ -284,7 +285,7 @@ export default function RegistrationForm() {
                 type="text"
                 placeholder="Last name"
                 required
-                className="p-3 border rounded-lg"
+                className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
                 onChange={(e) =>
                   setFormData({ ...formData, lastName: e.target.value })
                 }
@@ -302,7 +303,7 @@ export default function RegistrationForm() {
                 type="tel"
                 placeholder="Phone number"
                 required
-                className="p-3 border rounded-lg"
+                className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
                 onChange={(e) =>
                   setFormData({ ...formData, phone: e.target.value })
                 }
@@ -316,7 +317,7 @@ export default function RegistrationForm() {
                 type="email"
                 placeholder="Email address"
                 required
-                className="p-3 border rounded-lg"
+                className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
                 onChange={(e) =>
                   setFormData({ ...formData, email: e.target.value })
                 }
@@ -330,7 +331,7 @@ export default function RegistrationForm() {
               <label className="block text-sm font-medium mb-1">Gender</label>
               <select
                 required
-                className="w-full p-3 border rounded-lg"
+                className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
                 onChange={(e) =>
                   setFormData({ ...formData, gender: e.target.value })
                 }
@@ -351,7 +352,7 @@ export default function RegistrationForm() {
               <input
                 type="date"
                 required
-                className="p-3 border rounded-lg text-gray-500"
+                className="w-full p-3 border border-slate-200 rounded-lg text-gray-500 bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
                 onChange={(e) =>
                   setFormData({ ...formData, birthDate: e.target.value })
                 }
@@ -364,7 +365,7 @@ export default function RegistrationForm() {
             <label className="block font-semibold mb-2">Current Status</label>
             <select
               required
-              className="w-full p-3 border rounded-lg mb-2"
+              className="w-full p-3 border border-slate-200 rounded-lg mb-2 bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
               onChange={(e) =>
                 setFormData({ ...formData, maritalStatus: e.target.value })
               }
@@ -380,21 +381,17 @@ export default function RegistrationForm() {
 
           {/* Background Selection */}
           <section className="space-y-4">
-            <label className="block font-bold text-slate-700 mb-2">
+            <label className="block font-bold text-[#1E3D34] mb-2">
               What is your background?{" "}
-              <span className="text-xs font-normal text-slate-400">
+              <span className="text-xs font-normal text-slate-500">
                 (Select up to 2 if applicable)
               </span>
             </label>
 
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4">
-                Select up to 2
-              </p>
-
+            <div className="bg-[#E4ECE6] p-5 rounded-2xl border border-[#95B699]/40 shadow-sm">
               {/* SEPHARDIC SECTION */}
               <div className="mb-6">
-                <p className="text-sm font-bold text-slate-600 mb-3">
+                <p className="text-sm font-bold text-[#1E3D34] mb-3">
                   Sephardic:
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -406,7 +403,7 @@ export default function RegistrationForm() {
                       className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
                         isSelected(opt)
                           ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
-                          : "border-white bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
+                          : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                       }`}
                     >
                       {opt}
@@ -422,7 +419,7 @@ export default function RegistrationForm() {
                     className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
                       isSelected("Other Sephardic")
                         ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
-                        : "border-white bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
+                        : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                     }`}
                   >
                     Other Sephardic {isSelected("Other Sephardic") ? ":" : ""}
@@ -431,8 +428,8 @@ export default function RegistrationForm() {
                   {isSelected("Other Sephardic") && (
                     <input
                       type="text"
-                      placeholder="Specify (e.g. Mixed, Mashadi, Shirazi)..."
-                      className="w-full p-3 border rounded-xl mt-2 text-sm bg-white"
+                      placeholder="Specify (e.g. Mixed, Yemenite, Iraqi)..."
+                      className="w-full p-3 border border-[#95B699]/30 rounded-xl mt-2 text-sm bg-white text-[#1E3D34] outline-none focus:ring-2 focus:ring-[#95B699]"
                       value={formData.otherSephardicSpecify || ""}
                       onChange={(e) =>
                         setFormData({
@@ -446,7 +443,7 @@ export default function RegistrationForm() {
               </div>
 
               {/* SEPARATE LINES SECTION */}
-              <div className="space-y-2 border-t border-slate-200 pt-4">
+              <div className="space-y-2 border-t border-[#95B699]/30 pt-4 flex flex-col items-start">
                 {/* Ashkenaz */}
                 <button
                   type="button"
@@ -454,7 +451,7 @@ export default function RegistrationForm() {
                   className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
                     isSelected("Ashkenaz")
                       ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
-                      : "border-white bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
+                      : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                   }`}
                 >
                   Ashkenaz
@@ -467,7 +464,7 @@ export default function RegistrationForm() {
                   className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
                     isSelected("Other")
                       ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
-                      : "border-white bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
+                      : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                   }`}
                 >
                   Other {isSelected("Other") ? ":" : ""}
@@ -477,7 +474,7 @@ export default function RegistrationForm() {
                   <input
                     type="text"
                     placeholder="e.g., Chasidish, Chabad, etc."
-                    className="w-full p-3 border rounded-xl mt-1 text-sm bg-white"
+                    className="w-full p-3 border border-[#95B699]/30 rounded-xl mt-1 text-sm bg-white text-[#1E3D34] outline-none focus:ring-2 focus:ring-[#95B699]"
                     value={formData.otherSpecify || ""}
                     onChange={(e) =>
                       setFormData({ ...formData, otherSpecify: e.target.value })
@@ -491,23 +488,25 @@ export default function RegistrationForm() {
           {/* Religious Lifestyle */}
           <section>
             <label className="block font-semibold mb-2">Shabbat level</label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name="isShomerShabbat"
                   value="yes"
+                  className="accent-[#1E3D34]"
                   onChange={() =>
                     setFormData({ ...formData, isShomerShabbat: "yes" })
                   }
                 />{" "}
                 Shomer Shabbat
               </label>
-              <label className="flex items-center gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name="isShomerShabbat"
                   value="no"
+                  className="accent-[#1E3D34]"
                   onChange={() =>
                     setFormData({ ...formData, isShomerShabbat: "no" })
                   }
@@ -520,23 +519,25 @@ export default function RegistrationForm() {
           {/* Religious Lifestyle 2 */}
           <section>
             <label className="block font-semibold mb-2">Kashrut level</label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name="isShomerKashrut"
                   value="yes"
+                  className="accent-[#1E3D34]"
                   onChange={() =>
                     setFormData({ ...formData, isShomerKashrut: "yes" })
                   }
                 />{" "}
                 Kosher
               </label>
-              <label className="flex items-center gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name="isShomerKashrut"
                   value="no"
+                  className="accent-[#1E3D34]"
                   onChange={() =>
                     setFormData({ ...formData, isShomerKashrut: "no" })
                   }
@@ -551,22 +552,24 @@ export default function RegistrationForm() {
             <section>
               <label className="block font-semibold mb-2">Dress style</label>
               <div className="flex gap-4 mb-4">
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="dressStyle"
                     value="skirtsOnly"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, dressStyle: "skirtsOnly" })
                     }
                   />{" "}
                   Skirts only
                 </label>
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="dressStyle"
                     value="skirtsPants"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, dressStyle: "skirtsPants" })
                     }
@@ -581,12 +584,13 @@ export default function RegistrationForm() {
           {formData.gender === "woman" && (
             <section>
               <label className="block font-semibold mb-2">Hair covering</label>
-              <div className="flex gap-4 mb-4">
-                <label className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 mb-4">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="hairCovering"
                     value="willCoverHair"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({
                         ...formData,
@@ -596,22 +600,24 @@ export default function RegistrationForm() {
                   />{" "}
                   Will cover hair after marriage
                 </label>
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="hairCovering"
                     value="notPlanning"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, hairCovering: "notPlanning" })
                     }
                   />{" "}
                   Not planning to cover hair
                 </label>
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="hairCovering"
                     value="openFlexible"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, hairCovering: "openFlexible" })
                     }
@@ -629,22 +635,24 @@ export default function RegistrationForm() {
                 Are you a Kohen?
               </label>
               <div className="flex gap-4">
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="kohen"
                     value="yes"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, isKohen: "yes" })
                     }
                   />{" "}
                   Yes
                 </label>
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="kohen"
                     value="no"
+                    className="accent-[#1E3D34]"
                     onChange={() => setFormData({ ...formData, isKohen: "no" })}
                   />{" "}
                   No
@@ -659,34 +667,37 @@ export default function RegistrationForm() {
               <label className="block font-semibold mb-2">
                 Do you prefer a woman who will cover her hair?
               </label>
-              <div className="flex gap-4 mb-4">
-                <label className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="coverHead"
                     value="yes"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, wantsCoveredHead: "yes" })
                     }
                   />{" "}
                   Yes
                 </label>
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="coverHead"
                     value="no"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, wantsCoveredHead: "no" })
                     }
                   />{" "}
                   No
                 </label>
-                <label className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="coverHead"
                     value="noPreference"
+                    className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({
                         ...formData,
@@ -702,14 +713,14 @@ export default function RegistrationForm() {
 
           {/* Anything Else */}
           <div className="flex gap-4">
-            <div className="flex-3">
+            <div className="flex-1">
               <label className="block font-semibold mb-2">
                 Is there anything else you'd like us to know?
               </label>
               <input
                 type="text"
                 placeholder="Anything else?"
-                className="w-full p-3 border rounded-lg mb-2"
+                className="w-full p-3 border border-slate-200 rounded-lg mb-2 bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
                 onChange={(e) =>
                   setFormData({ ...formData, anythingElse: e.target.value })
                 }

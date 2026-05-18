@@ -211,7 +211,7 @@ const RsvpPage = () => {
           <div className="space-y-4">
             <button
               onClick={() => handleResponse("declined")}
-              className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-800 transition-colors shadow-lg"
+              className="w-full bg-[#95B699]/300 text-white font-bold py-4 rounded-xl hover:bg-[#95B699]/400 transition-colors shadow-lg"
             >
               Yes, cancel my invitation.
             </button>
@@ -241,7 +241,7 @@ const RsvpPage = () => {
         <div className="space-y-4">
           <button
             onClick={() => handleResponse("confirmed")}
-            className="w-full bg-blue-900 text-white font-bold py-4 rounded-xl hover:bg-blue-800 transition-colors shadow-lg"
+            className="w-full bg-[#95B699]/300 text-white font-bold py-4 rounded-xl hover:bg-[#95B699]/400 transition-colors shadow-lg"
           >
             Yes, confirm my spot!
           </button>
