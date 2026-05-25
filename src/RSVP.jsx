@@ -130,7 +130,7 @@ const RsvpPage = () => {
 
   if (step === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div>
       </div>
     );
@@ -138,7 +138,7 @@ const RsvpPage = () => {
 
   if (step === "error") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
           <h2 className="text-xl font-bold text-red-600 mb-2">Oops!</h2>
           <p className="text-slate-500">{errorMsg}</p>
@@ -149,7 +149,7 @@ const RsvpPage = () => {
 
   if (step === "success") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
           <div
             className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${
@@ -199,7 +199,7 @@ const RsvpPage = () => {
 
   if (action === "cancel") {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
+      <div className="min-h-screen flex flex-col items-center justify-center p-6">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
           <h2 className="text-2xl font-bold text-slate-900 mb-2">
             Cancel Invitation?
@@ -211,7 +211,7 @@ const RsvpPage = () => {
           <div className="space-y-4">
             <button
               onClick={() => handleResponse("declined")}
-              className="w-full bg-[#95B699]/300 text-white font-bold py-4 rounded-xl hover:bg-[#95B699]/400 transition-colors shadow-lg"
+              className="w-full bg-[#2c4d30] text-white font-bold py-4 rounded-xl hover:bg-[#95B699] transition-colors shadow-lg"
             >
               Yes, cancel my invitation.
             </button>
@@ -229,7 +229,7 @@ const RsvpPage = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
+    <div className="min-h-screen flex flex-col items-center justify-center p-6">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
         <h2 className="text-2xl font-bold text-slate-900 mb-2">
           Event Invitation
@@ -241,7 +241,7 @@ const RsvpPage = () => {
         <div className="space-y-4">
           <button
             onClick={() => handleResponse("confirmed")}
-            className="w-full bg-[#95B699]/300 text-white font-bold py-4 rounded-xl hover:bg-[#95B699]/400 transition-colors shadow-lg"
+            className="w-full bg-[#2c4d30] text-white font-bold py-4 rounded-xl hover:bg-[#95B699] transition-colors shadow-lg"
           >
             Yes, confirm my spot!
           </button>

@@ -176,53 +176,52 @@ export default function Gatekeeper() {
 const groupGrids = useMemo(() => {
   const getOnlyNumber = (val) => {
     if (!val) return 0;
-    const cleaned = String(val).replace(/\D/g, "");
-    return parseInt(cleaned) || 0;
+    // Extract ONLY the very first number found in the string
+    const match = String(val).match(/\d+/);
+    return match ? parseInt(match[0], 10) : 0;
   };
 
-  // 1. Get unique Group IDs from the registrations (attendees) 
-  // rather than the master list
   const uniqueGroupIds = [
     ...new Set(attendees.map((reg) => reg.groupId || "Unassigned")),
   ].sort((a, b) =>
     String(a).localeCompare(String(b), undefined, { numeric: true })
   );
 
-  // 2. Build the layout for each group
   return uniqueGroupIds.map((groupId) => {
-    // Filter registrations belonging to this group
     const groupRegs = attendees.filter((reg) => (reg.groupId || "Unassigned") === groupId);
 
-    // Calculate the max table number specifically for this group's attendees
-    const groupMaxTable = Math.max(
-      6, 
-      ...groupRegs.map((reg) => getOnlyNumber(reg.tableNumber))
-    );
+    // Removed the hardcoded '6' minimum so it scales exactly to your tables.
+    // If there are no tables, it safely defaults to 1.
+    const tableNumbers = groupRegs.map((reg) => getOnlyNumber(reg.tableNumber));
+    const groupMaxTable = tableNumbers.length > 0 ? Math.max(...tableNumbers) : 1;
 
     const girlsRow = Array(groupMaxTable).fill(null);
     const boysRow = Array(groupMaxTable).fill(null);
 
     groupRegs.forEach((reg) => {
-      // Find the base user info to match the registration
       const user = masterUsers.find((u) => u.id === reg.userId);
       const tableIdx = getOnlyNumber(reg.tableNumber) - 1;
 
+      if (tableIdx < 0) {
+        console.warn(`Missing or invalid table number for: ${user?.firstName} ${user?.lastName}`);
+      }
+
       if (tableIdx >= 0 && user) {
-        // Use the gender from the registration record (redundant field) or user object
         const gender = (reg.gender || user.gender || "").toLowerCase();
         const isMale = ["man", "boy", "male"].includes(gender);
 
-        const personData = { ...user, ...reg }; // Merge user info and registration info
+        const personData = { ...user, ...reg };
 
         if (isMale) {
+          if (boysRow[tableIdx]) console.warn(`Duplicate Table ${tableIdx + 1} found for Boys!`);
           boysRow[tableIdx] = personData;
         } else {
+          if (girlsRow[tableIdx]) console.warn(`Duplicate Table ${tableIdx + 1} found for Girls!`);
           girlsRow[tableIdx] = personData;
         }
       }
     });
 
-    // Stats based on registrations in this group
     const stats = {
       boys: groupRegs.filter(r => ["man", "boy", "male"].includes(r.gender?.toLowerCase())).length,
       girls: groupRegs.filter(r => !["man", "boy", "male"].includes(r.gender?.toLowerCase())).length,
@@ -277,7 +276,7 @@ const groupGrids = useMemo(() => {
   // --- VIEW: ADMIN DASHBOARD ---
   if (viewMode === "admin") {
     return (
-      <div className="min-h-screen bg-slate-50 p-6">
+      <div className="min-h-screen p-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex justify-between items-center mb-8">
             <div>
@@ -550,7 +549,7 @@ const groupGrids = useMemo(() => {
   }
   if (potentialMatches.length > 1) {
     return (
-      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-100">
         <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
           <h2 className="text-2xl font-black mb-2 text-slate-900">
             Which one is you?
@@ -597,7 +596,7 @@ const groupGrids = useMemo(() => {
   // --- PHASE 1: LOGIN MODAL ---
   if (!myProfile) {
     return (
-      <div className="min-h-screen bg-[#1E3D34] flex items-center justify-center p-6">
+      <div className="min-h-screen flex items-center justify-center p-6">
         <div className="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-lg">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-black text-slate-900 mb-2">
@@ -646,15 +645,15 @@ const groupGrids = useMemo(() => {
             </button>
           </form>
 
-          {/* COMMENT OUT THIS BUTTON FOR NOW */}
-{/* 
+          {/* COMMENT OUT THIS BUTTON IF WANTED */}
+
           <button
             onClick={() => setViewMode("admin")}
             className="w-full mt-8 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-blue-600 transition-colors"
           >
             <ShieldCheck size={14} /> Admin Access
           </button>
-*/}
+
           
         </div>
       </div>

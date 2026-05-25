@@ -226,7 +226,7 @@ export default function RegistrationForm() {
   };
 
   return (
-    <div className="min-h-screen bg-[#DEE8DF] py-12 px-4 text-[#1E3D34]">
+    <div className="min-h-screen py-12 px-4 text-[#1E3D34]">
       {/* Container Background changed from bg-white to bg-[#DEE8DF] to seamlessly carry the theme color inside */}
       <div className="max-w-xl mx-auto bg-[#DEE8DF] p-6 sm:p-10 rounded-2xl border border-[#95B699] shadow-sm">
         <h2 className="text-3xl font-bold text-[#1E3D34] mb-8 text-center">
@@ -384,7 +384,7 @@ export default function RegistrationForm() {
             <label className="block font-bold text-[#1E3D34] mb-2">
               What is your background?{" "}
               <span className="text-xs font-normal text-slate-500">
-                (Select up to 2 if applicable)
+                (Select up to 2)
               </span>
             </label>
 
@@ -443,7 +443,10 @@ export default function RegistrationForm() {
               </div>
 
               {/* SEPARATE LINES SECTION */}
-              <div className="space-y-2 border-t border-[#95B699]/30 pt-4 flex flex-col items-start">
+              <div className="mb-6 space-y-2 border-t border-[#95B699]/30 pt-4 flex flex-col items-start">
+              <p className="text-sm font-bold text-[#1E3D34] mb-3">
+                  Ashkenaz:
+                </p>
                 {/* Ashkenaz */}
                 <button
                   type="button"
@@ -456,7 +459,12 @@ export default function RegistrationForm() {
                 >
                   Ashkenaz
                 </button>
+              </div>
 
+              <div className="space-y-2 border-t border-[#95B699]/30 pt-4 flex flex-col items-start">
+                <p className="text-sm font-bold text-[#1E3D34] mb-3">
+                  Other:
+                </p>
                 {/* Other */}
                 <button
                   type="button"

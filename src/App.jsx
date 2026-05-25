@@ -11,9 +11,9 @@ function Home() {
   return (
     <div className="flex flex-col items-center justify-center pt-16 pb-12 px-4">
       <h1 className="text-4xl md:text-6xl font-light text-[#1E3D34] tracking-tight mb-4">
-        Tikvah <span className="font-semibold text-[#95B699]">Together</span>
+        Tikvah <span className="font-semibold text-[#1E3D34]">Together</span>
       </h1>
-      <div className="w-20 h-1 bg-[#95B699] mb-8"></div>
+      <div className="w-20 h-1 bg-[#1E3D34] mb-8"></div>
       <p className="text-xl text-slate-600 mb-12 max-w-2xl text-center leading-relaxed">
         Modern events for the Jewish community. Simple, organized, and
         meaningful.
@@ -71,8 +71,8 @@ function Home() {
 function App() {
   return (
     <Router>
-      <div className="min-h-screen bg-white flex flex-col">
-        <nav className="border-b border-slate-100 py-6 shrink-0">
+      <div className="min-h-screen bg-linear-to-b from-[#95B699] via-[#95B699]/80 to-white flex flex-col">
+        <nav className="border-b border-white/20 py-6 shrink-0">
           <div className="max-w-6xl mx-auto px-6 flex justify-between items-center">
             <Link
               to="/"
@@ -133,7 +133,7 @@ function App() {
           </Routes>
         </main>
 
-        <footer className="py-8 border-t border-slate-200 text-center text-slate-400 text-sm shrink-0 bg-white">
+        <footer className="py-8 border-t border-white/20 text-center text-[#1E3D34]/50 text-sm shrink-0">
           © {new Date().getFullYear()} Tikvah Together.
         </footer>
       </div>

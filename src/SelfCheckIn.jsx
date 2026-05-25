@@ -147,7 +147,7 @@ const handleCheckIn = async (e) => {
 
   if (step === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-900"></div>
       </div>
     );
@@ -155,7 +155,7 @@ const handleCheckIn = async (e) => {
 
   if (step === "success") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
           <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -178,7 +178,7 @@ const handleCheckIn = async (e) => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
+    <div className="min-h-screen flex flex-col items-center justify-center p-6">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8">
         <h2 className="text-2xl font-bold text-slate-900 text-center mb-2">Event Check-In</h2>
         <p className="text-slate-500 text-center mb-8">Please enter your details to join the event.</p>
@@ -197,7 +197,7 @@ const handleCheckIn = async (e) => {
           
           <button
             type="submit"
-            className="w-full bg-blue-900 text-white font-bold py-4 rounded-xl hover:bg-blue-800 transition-colors shadow-lg shadow-blue-900/20"
+            className="w-full bg-[#1E3D34] text-white font-bold py-4 rounded-xl hover:bg-[#95B699] transition-colors shadow-lg shadow-blue-900/20"
           >
             Check In
           </button>
