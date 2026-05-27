@@ -596,16 +596,34 @@ export default function AdminDashboard() {
     }
   };
 
-  const deleteUserFromMaster = async (userId, name) => {
+const deleteUserFromMaster = async (userId, name) => {
+    // Fallback if name is passed incorrectly or empty
+    const displayName = name || "this user"; 
+    
     if (
       window.confirm(
-        `Permanently delete ${name} from the Master List? This cannot be undone.`,
+        `Permanently delete ${displayName} from the Master List? This will also remove them from all events and cannot be undone.`,
       )
     ) {
       try {
+        // 1. Delete the user from the master 'users' collection
         await deleteDoc(doc(db, "users", userId));
+
+        // 2. Query and delete all registrations associated with this userId
+        const regQuery = query(
+          collection(db, "registrations"),
+          where("userId", "==", userId)
+        );
+        const regSnap = await getDocs(regQuery);
+        
+        // Execute all deletion promises concurrently
+        const deletePromises = regSnap.docs.map((docSnap) => 
+          deleteDoc(docSnap.ref)
+        );
+        await Promise.all(deletePromises);
+
       } catch (err) {
-        console.error("Error deleting user:", err);
+        console.error("Error performing cascading user deletion:", err);
       }
     }
   };
@@ -2542,7 +2560,7 @@ export default function AdminDashboard() {
                                   <button
                                     onClick={() =>
                                       activeTab === "master"
-                                        ? deleteUserFromMaster(a.id, a.name)
+                                        ? deleteUserFromMaster(a.id, a.firstName + " " + a.lastName)
                                         : deleteAttendee(
                                             a.id,
                                             a.firstName + " " + a.lastName,
