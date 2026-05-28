@@ -72,7 +72,7 @@ function App() {
   return (
     <Router>
       <div className="min-h-screen bg-linear-to-b from-[#95B699] from-0% to-[#dde7de] to-20% flex flex-col">
-        <nav className="border-b border-white/20 py-6 shrink-0">
+        <nav className="border-b-0 border-white/20 py-6 shrink-0">
           <div className="max-w-6xl mx-auto px-6 flex justify-between items-center">
             <Link
               to="/"
