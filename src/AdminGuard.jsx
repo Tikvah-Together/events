@@ -105,7 +105,7 @@ export default function AdminGuard({ children }) {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-[#DEE8DF] flex flex-col items-center justify-center px-6 py-12">
+      <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12">
         <div className="w-full max-w-md bg-white p-8 border border-[#95B699] rounded-2xl shadow-md text-[#1E3D34]">
           <h2 className="text-2xl font-bold mb-2 text-center">
             {isRegistering ? "Create Admin Account" : "Admin Dashboard Access"}
