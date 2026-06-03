@@ -136,23 +136,17 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     );
 
   // --- 1. PARSE USER TABLE & GROUP ---
-  // Logic: "Table 1 - YP" -> "Table 1" and "YP"
   const userInfoForThisEvent = attendees.find((a) => a.userId === user.id);
   console.log(userInfoForThisEvent);
-  console.log("User's table number string:", userInfoForThisEvent.tableNumber);
-  const tableString = userInfoForThisEvent.tableNumber || "Table 1 - Default";
-  const tableParts = tableString.split(" - ");
-  console.log("Parsed table parts:", tableParts);
-  const tablePart = tableParts[0] || "Table 1";
-  const groupName = tableParts[1] || "Default"; // Ensure groupName isn't undefined
-  const startTableNum = parseInt(tablePart.replace("Table ", ""), 10) || 1;
+  const groupName = userInfoForThisEvent.groupId || "Group 1";
+  const startTableNum = userInfoForThisEvent.tableNumber || 0;
   console.log("User's starting table number:", startTableNum);
 
   // --- 2. DYNAMIC GROUP MATH ---
   // Filter attendees to ONLY those in this user's group (e.g., "YP")
   const groupAttendees = attendees.filter((a) => {
-    const aTable = a.tableNumber || "";
-    return aTable.toLowerCase().includes(`- ${groupName.toLowerCase()}`);
+    const aGroup = a.groupId || "Group 1";
+    return aGroup.toLowerCase() === groupName.toLowerCase();
   });
 
   // Calculate unique tables in this specific group
@@ -251,7 +245,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     if (attendeeUser.gender === user.gender) return false;
 
     // 2. Group check
-    const pTableString = a.tableNumber || "";
+    const pTableString = a.tableNumber || 0;
     if (!pTableString.toLowerCase().includes(`- ${groupName.toLowerCase()}`))
       return false;
 

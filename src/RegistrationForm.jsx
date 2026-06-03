@@ -131,7 +131,6 @@ export default function RegistrationForm() {
       const userAge = calculateAge(formData.birthDate);
 
       // 2. Find or Create the permanent User based on Email
-      // (You could also use Phone number as the unique key)
       const userQuery = query(
         collection(db, "users"),
         where("email", "==", formData.email.toLowerCase().trim()),
@@ -146,7 +145,7 @@ export default function RegistrationForm() {
         await updateDoc(doc(db, "users", internalUserId), {
           ...userProfile,
           age: userAge,
-          createdAt: new Date(),
+          updatedAt: new Date(), // Change this to updatedAt so you don't lose the original createdAt!
         });
       } else {
         // New User: Create permanent profile
@@ -172,28 +171,42 @@ export default function RegistrationForm() {
       const regCheckSnap = await getDocs(regCheckQuery);
 
       if (!regCheckSnap.empty) {
-        alert("You are already registered for this event!");
+        // They are already registered for this event, so just update their profile info
+        const internalRegId = regCheckSnap.docs[0].id;
+        await updateDoc(doc(db, "registrations", internalRegId), {
+          userId: internalUserId,
+          eventId: eventId,
+          checkedIn: false,
+          tableNumber: null,
+          status: "pending invite",
+          groupId: "Group 1",
+          timestamp: new Date(),
+          gender: formData.gender,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+        });
+        alert(
+          "You are already registered for this event! We have updated your profile info with the latest details you provided.",
+        );
         setLoading(false);
         return;
+      } else {
+        // New User: Create new registration
+        await addDoc(collection(db, "registrations"), {
+          userId: internalUserId,
+          eventId: eventId,
+          checkedIn: false,
+          tableNumber: null,
+          status: "pending invite",
+          groupId: "Group 1",
+          timestamp: new Date(),
+          gender: formData.gender,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+        });
       }
 
-      // 4. Create the Event Registration
-      await addDoc(collection(db, "registrations"), {
-        userId: internalUserId,
-        eventId: eventId,
-        checkedIn: false,
-        tableNumber: null,
-        status: "pending invite", // other e.g., invited, confirmed, declined, waitlist, no response (3 days after invite)
-        groupId: "Group 1", // Default group assignment
-        timestamp: new Date(),
-        // We store a few redundant fields for quick filtering in Admin without extra joins
-        gender: formData.gender,
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-      });
-
       // 5. Trigger the Email via the 'email' collection
-      // Find the name dynamically to ensure it isn't stale
       const eventNameForEmail = urlEventId
         ? selectedEventName
         : events.find((e) => e.id === eventId)?.name;
@@ -444,7 +457,7 @@ export default function RegistrationForm() {
 
               {/* SEPARATE LINES SECTION */}
               <div className="mb-6 space-y-2 border-t border-[#95B699]/30 pt-4 flex flex-col items-start">
-              <p className="text-sm font-bold text-[#1E3D34] mb-3">
+                <p className="text-sm font-bold text-[#1E3D34] mb-3">
                   Ashkenaz:
                 </p>
                 {/* Ashkenaz */}
@@ -462,9 +475,7 @@ export default function RegistrationForm() {
               </div>
 
               <div className="space-y-2 border-t border-[#95B699]/30 pt-4 flex flex-col items-start">
-                <p className="text-sm font-bold text-[#1E3D34] mb-3">
-                  Other:
-                </p>
+                <p className="text-sm font-bold text-[#1E3D34] mb-3">Other:</p>
                 {/* Other */}
                 <button
                   type="button"

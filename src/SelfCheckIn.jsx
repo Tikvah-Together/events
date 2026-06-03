@@ -83,7 +83,7 @@ const handleCheckIn = async (e) => {
       const regRef = doc(db, "registrations", regDoc.id);
 
       if (regData.checkedIn) {
-        setTableNumber(regData.tableNumber || "Error");
+        setTableNumber(regData.tableNumber || 0);
         setStep("success");
         return;
       }
@@ -126,7 +126,7 @@ const handleCheckIn = async (e) => {
       }
 
       const newEventLabel = `${prefix}${assignedNumber}-${groupSuffix}`;
-      const newTableNumber = `Table ${assignedNumber} - ${participantGroupName || "U"}`;
+      const newTableNumber = assignedNumber;
 
       // 4. Update Database with the assigned table info
       await updateDoc(regRef, {

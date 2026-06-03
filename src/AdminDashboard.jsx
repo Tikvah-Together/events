@@ -320,7 +320,7 @@ export default function AdminDashboard() {
     });
   };
 
-  const toggleCheckIn = async (attendeeId, currentStatus) => {
+const toggleCheckIn = async (attendeeId, currentStatus) => {
     try {
       const newStatus = !currentStatus;
       const regRef = doc(db, "registrations", attendeeId);
@@ -381,10 +381,23 @@ export default function AdminDashboard() {
             a.eventLabel?.startsWith(prefix),
         )
         .map((a) => {
-          // Extract number from "B1-A" -> "1"
-          const beforeHyphen = a.eventLabel.split("-")[0]; // "B1"
-          const numOnly = beforeHyphen.substring(1); // "1"
-          return parseInt(numOnly);
+          // SAFE TRANSITION: Check if it's already a clean number
+          if (typeof a.tableNumber === "number") return a.tableNumber;
+
+          // Fallback: If there are lingering old string formats (e.g., "Table 1 - Group 1")
+          if (typeof a.tableNumber === "string") {
+            const match = a.tableNumber.match(/Table\s+(\d+)/i);
+            if (match) return parseInt(match[1], 10);
+          }
+
+          // Ultimate fallback using your original eventLabel parsing logic
+          if (a.eventLabel) {
+            const beforeHyphen = a.eventLabel.split("-")[0];
+            const numOnly = beforeHyphen.substring(1);
+            return parseInt(numOnly, 10);
+          }
+
+          return NaN;
         })
         .filter((num) => !isNaN(num))
         .sort((a, b) => a - b);
@@ -400,7 +413,7 @@ export default function AdminDashboard() {
       await updateDoc(regRef, {
         checkedIn: true,
         eventLabel: `${prefix}${assignedNumber}-${groupSuffix}`,
-        tableNumber: `Table ${assignedNumber} - ${participantGroupName || "U"}`,
+        tableNumber: assignedNumber,
       });
     } catch (err) {
       console.error("Check-in error:", err);
@@ -2312,25 +2325,20 @@ const deleteUserFromMaster = async (userId, name) => {
                                 {activeTab === "events" && (
                                   <td className="px-6 py-4">
                                     <div className="flex items-center gap-2">
-                                      {/* Input for the Number (e.g., "1") */}
+                                      {/* Input for the Number */}
                                       Table
                                       <input
-                                        type="text"
+                                        type="number"
                                         placeholder="#"
                                         className="bg-transparent border border-slate-100 rounded p-1 w-12 text-[11px] outline-none focus:bg-white"
-                                        value={(a.tableNumber || "")
-                                          .split(" - ")[0]
-                                          .replace("Table ", "")}
+                                        value={(a.tableNumber || 0)}
                                         onChange={(e) => {
-                                          const groupName =
-                                            (a.tableNumber || "").split(
-                                              " - ",
-                                            )[1] || "";
+                                          const groupName = (a.tableNumber || 0);
                                           const newNum = e.target.value;
                                           updateAttendeeField(
                                             a,
                                             "tableNumber",
-                                            `Table ${newNum}${groupName ? ` - ${groupName}` : ""}`,
+                                            parseInt(newNum) || 0,
                                           );
                                         }}
                                       />
@@ -2342,21 +2350,14 @@ const deleteUserFromMaster = async (userId, name) => {
                                         type="text"
                                         placeholder="Group Name"
                                         className="bg-transparent border border-slate-100 rounded p-1 w-24 text-[11px] outline-none focus:bg-white"
-                                        value={
-                                          (a.tableNumber || "").split(
-                                            " - ",
-                                          )[1] || ""
-                                        }
+                                        value={a.groupId || ""}
                                         onChange={(e) => {
-                                          const tableNum =
-                                            (a.tableNumber || "").split(
-                                              " - ",
-                                            )[0] || "Table ";
+                                          const tableNum = a.groupId || "";
                                           const newGroupName = e.target.value;
                                           updateAttendeeField(
                                             a,
-                                            "tableNumber",
-                                            `${tableNum} - ${newGroupName}`,
+                                            "groupId",
+                                            newGroupName,
                                           );
                                         }}
                                       />

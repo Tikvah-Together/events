@@ -31,6 +31,7 @@ export default function Gatekeeper() {
   const [potentialMatches, setPotentialMatches] = useState([]);
   const [masterUsers, setMasterUsers] = useState([]);
   const [viewMode, setViewMode] = useState("user"); // 'user' or 'admin'
+  const [draggedPerson, setDraggedPerson] = useState(null); // Track HTML5 dragged user
 
   // Admin Entry Modal State
   const [adminTargetUser, setAdminTargetUser] = useState(null);
@@ -89,7 +90,7 @@ export default function Gatekeeper() {
       }
     });
     return () => unsubscribe();
-  }, [selectedEventId, myProfile?.id]);
+  }, [selectedEventId, myProfile?.id, masterUsers]);
 
   // 3. Login Logic
   const handleVerifyIdentity = async (e) => {
@@ -173,91 +174,163 @@ export default function Gatekeeper() {
     }
   };
 
-const groupGrids = useMemo(() => {
-  const getOnlyNumber = (val) => {
-    if (!val) return 0;
-    // Extract ONLY the very first number found in the string
-    const match = String(val).match(/\d+/);
-    return match ? parseInt(match[0], 10) : 0;
+  const handleMoveAttendee = async (
+    sourcePerson,
+    targetGroupId,
+    targetTableNum,
+  ) => {
+    if (!sourcePerson || !sourcePerson.id) return;
+
+    // Prevent redundant database hits if dropped onto its original spot
+    if (
+      sourcePerson.groupId === targetGroupId &&
+      sourcePerson.tableNumber === targetTableNum
+    )
+      return;
+
+    try {
+      const sourceGender = (sourcePerson.gender || "").toLowerCase();
+      const isSourceMale = ["man", "boy", "male"].includes(sourceGender);
+
+      // Find if anyone of the SAME gender is already sitting at that specific target table slot
+      const conflictingReg = attendees.find((reg) => {
+        const regGender = (reg.gender || "").toLowerCase();
+        const isRegMale = ["man", "boy", "male"].includes(regGender);
+
+        return (
+          reg.groupId === targetGroupId &&
+          reg.tableNumber === targetTableNum &&
+          isRegMale === isSourceMale &&
+          reg.id !== sourcePerson.id // Ensure it's not the same registration doc
+        );
+      });
+
+      const sourceRef = doc(db, "registrations", sourcePerson.id);
+
+      if (conflictingReg) {
+        // SWAP SPOTS: Send the person occupying the target table to the dragged person's old spot
+        const conflictingRef = doc(db, "registrations", conflictingReg.id);
+
+        await updateDoc(sourceRef, {
+          groupId: targetGroupId,
+          tableNumber: targetTableNum,
+        });
+
+        await updateDoc(conflictingRef, {
+          groupId: sourcePerson.groupId || "Group 1",
+          tableNumber: sourcePerson.tableNumber || 1,
+        });
+      } else {
+        // NO CONFLICT: Empty slot, move directly
+        await updateDoc(sourceRef, {
+          groupId: targetGroupId,
+          tableNumber: targetTableNum,
+        });
+      }
+    } catch (err) {
+      console.error("Error moving attendee:", err);
+    }
   };
 
-  const uniqueGroupIds = [
-    ...new Set(attendees.map((reg) => reg.groupId || "Unassigned")),
-  ].sort((a, b) =>
-    String(a).localeCompare(String(b), undefined, { numeric: true })
-  );
+  const groupGrids = useMemo(() => {
+    const uniqueGroupIds = [
+      ...new Set(attendees.map((reg) => reg.groupId || "Unassigned")),
+    ].sort((a, b) =>
+      String(a).localeCompare(String(b), undefined, { numeric: true }),
+    );
 
-  return uniqueGroupIds.map((groupId) => {
-    const groupRegs = attendees.filter((reg) => (reg.groupId || "Unassigned") === groupId);
+    return uniqueGroupIds.map((groupId) => {
+      const groupRegs = attendees.filter(
+        (reg) => (reg.groupId || "Unassigned") === groupId,
+      );
 
-    // Removed the hardcoded '6' minimum so it scales exactly to your tables.
-    // If there are no tables, it safely defaults to 1.
-    const tableNumbers = groupRegs.map((reg) => getOnlyNumber(reg.tableNumber));
-    const groupMaxTable = tableNumbers.length > 0 ? Math.max(...tableNumbers) : 1;
+      const tableNumbers = groupRegs.map((reg) => reg.tableNumber);
+      const groupMaxTable =
+        tableNumbers.length > 0 ? Math.max(...tableNumbers) : 1;
 
-    const girlsRow = Array(groupMaxTable).fill(null);
-    const boysRow = Array(groupMaxTable).fill(null);
+      const girlsRow = Array(groupMaxTable).fill(null);
+      const boysRow = Array(groupMaxTable).fill(null);
 
-    groupRegs.forEach((reg) => {
-      const user = masterUsers.find((u) => u.id === reg.userId);
-      const tableIdx = getOnlyNumber(reg.tableNumber) - 1;
+      groupRegs.forEach((reg) => {
+        const user = masterUsers.find((u) => u.id === reg.userId);
+        const tableNum = reg.tableNumber;
+        const tableIdx = tableNum - 1;
 
-      if (tableIdx < 0) {
-        console.warn(`Missing or invalid table number for: ${user?.firstName} ${user?.lastName}`);
-      }
+        if (tableIdx >= 0 && user) {
+          const gender = (reg.gender || user.gender || "").toLowerCase();
+          const isMale = ["man", "boy", "male"].includes(gender);
 
-      if (tableIdx >= 0 && user) {
-        const gender = (reg.gender || user.gender || "").toLowerCase();
-        const isMale = ["man", "boy", "male"].includes(gender);
+          const personData = { ...user, ...reg };
 
-        const personData = { ...user, ...reg };
-
-        if (isMale) {
-          if (boysRow[tableIdx]) console.warn(`Duplicate Table ${tableIdx + 1} found for Boys!`);
-          boysRow[tableIdx] = personData;
-        } else {
-          if (girlsRow[tableIdx]) console.warn(`Duplicate Table ${tableIdx + 1} found for Girls!`);
-          girlsRow[tableIdx] = personData;
+          if (isMale) {
+            boysRow[tableIdx] = personData;
+          } else {
+            girlsRow[tableIdx] = personData;
+          }
         }
-      }
+      });
+
+      const stats = {
+        boys: groupRegs.filter((r) =>
+          ["man", "boy", "male"].includes(r.gender?.toLowerCase()),
+        ).length,
+        girls: groupRegs.filter(
+          (r) => !["man", "boy", "male"].includes(r.gender?.toLowerCase()),
+        ).length,
+      };
+
+      return { groupId, girlsRow, boysRow, stats, tableCount: groupMaxTable };
     });
+  }, [masterUsers, attendees]);
 
-    const stats = {
-      boys: groupRegs.filter(r => ["man", "boy", "male"].includes(r.gender?.toLowerCase())).length,
-      girls: groupRegs.filter(r => !["man", "boy", "male"].includes(r.gender?.toLowerCase())).length,
-    };
-
-    return { groupId, girlsRow, boysRow, stats, tableCount: groupMaxTable };
-  });
-}, [masterUsers, attendees]);
-
-  // Helper to render a table square
-  const TableSquare = ({ person, tableNum, colorClass }) => (
+  // Helper to render a table square with drag and drop listeners
+  const TableSquare = ({ person, tableNum, colorClass, groupId }) => (
     <div
+      draggable={!!person}
+      onDragStart={(e) => {
+        // Required by some browser engines to properly initialize drag sequences
+        e.dataTransfer.setData("text/plain", person.id);
+
+        // Defer the state re-render by 0ms so the browser can snapshot
+        // the drag ghost image BEFORE layout classes (like scale-95) apply
+        setTimeout(() => setDraggedPerson(person), 0);
+      }}
+      onDragEnd={() => {
+        // Safety fallback: Clears state if user drops card outside of a dropzone
+        setDraggedPerson(null);
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={() => {
+        if (draggedPerson) {
+          handleMoveAttendee(draggedPerson, groupId, tableNum);
+          setDraggedPerson(null);
+        }
+      }}
       onClick={() => person && setAdminTargetUser(person)}
-      className={`relative h-24 w-full border-2 rounded-xl flex flex-col items-center justify-center p-2 transition-all cursor-pointer
+      className={`relative h-24 w-full border-2 rounded-xl flex flex-col items-center justify-center p-2 transition-all cursor-pointer select-none
+        ${draggedPerson && draggedPerson.id === person?.id ? "opacity-30 border-blue-400 border-dashed scale-95" : ""}
         ${
           person
             ? `${colorClass} border-transparent shadow-sm hover:scale-105`
-            : "border-dashed border-slate-200 bg-white opacity-40"
+            : "border-dashed border-slate-200 bg-white opacity-40 hover:bg-slate-50 hover:border-slate-400"
         }`}
     >
-      <span className="absolute top-1 left-2 text-[10px] font-black opacity-30">
+      <span className="absolute top-1 left-2 text-[10px] font-black opacity-30 pointer-events-none">
         T-{tableNum}
       </span>
       {person ? (
         <>
-          <p className="text-xs font-bold text-center leading-tight">
+          <p className="text-xs font-bold text-center leading-tight pointer-events-none">
             {person.firstName}
           </p>
-          <div className="mt-1 flex gap-1">
+          <div className="mt-1 flex gap-1 pointer-events-none">
             {person.feedbackData?.length > 0 && (
               <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
             )}
           </div>
         </>
       ) : (
-        <span className="text-[10px] text-slate-300 font-bold uppercase">
+        <span className="text-[10px] text-slate-300 font-bold uppercase pointer-events-none">
           Empty
         </span>
       )}
@@ -309,7 +382,7 @@ const groupGrids = useMemo(() => {
                       Group {group.groupId}
                     </h2>
                     <p className="text-slate-500 font-medium">
-                      Table Layout & Assignments
+                      Table Layout & Assignments (Drag & Drop to rearrange)
                     </p>
                   </div>
 
@@ -330,14 +403,18 @@ const groupGrids = useMemo(() => {
                       <span className="w-12 h-px bg-pink-200" /> Women's Row
                     </h3>
                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
-                      {group.girlsRow.map((person, idx) => (
-                        <TableSquare
-                          key={`group-${group.groupId}-girl-${idx}`}
-                          person={person}
-                          tableNum={idx + 1}
-                          colorClass="bg-pink-100 text-pink-700 border-pink-200"
-                        />
-                      ))}
+                      {group.girlsRow.map((person, idx) => {
+                        const tableNum = idx + 1;
+                        return (
+                          <TableSquare
+                            key={`group-${group.groupId}-girl-${tableNum}`}
+                            person={person}
+                            tableNum={tableNum}
+                            groupId={group.groupId}
+                            colorClass="bg-pink-100 text-pink-700 border-pink-200"
+                          />
+                        );
+                      })}
                     </div>
                   </section>
 
@@ -347,14 +424,18 @@ const groupGrids = useMemo(() => {
                       <span className="w-12 h-px bg-blue-200" /> Men's Row
                     </h3>
                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
-                      {group.boysRow.map((person, idx) => (
-                        <TableSquare
-                          key={`group-${group.groupId}-boy-${idx}`}
-                          person={person}
-                          tableNum={idx + 1}
-                          colorClass="bg-blue-100 text-blue-700 border-blue-200"
-                        />
-                      ))}
+                      {group.boysRow.map((person, idx) => {
+                        const tableNum = idx + 1;
+                        return (
+                          <TableSquare
+                            key={`group-${group.groupId}-boy-${tableNum}`}
+                            person={person}
+                            tableNum={tableNum}
+                            groupId={group.groupId}
+                            colorClass="bg-blue-100 text-blue-700 border-blue-200"
+                          />
+                        );
+                      })}
                     </div>
                   </section>
                 </div>
@@ -366,7 +447,6 @@ const groupGrids = useMemo(() => {
             {masterUsers
               .filter((u) => attendees.some((reg) => reg.userId === u.id))
               .map((user) => {
-                // 1. Find the specific registration record for this user
                 const registration = attendees.find(
                   (reg) => reg.userId === user.id,
                 );
@@ -402,7 +482,8 @@ const groupGrids = useMemo(() => {
                       </button>
                     </div>
                     <div className="text-xs text-slate-500">
-                      Starting Table: {registration.tableNumber || "N/A"}
+                      Starting Table: {registration.groupId} -{" "}
+                      {"Table " + registration.tableNumber || "N/A"}
                     </div>
                     <div className="text-xs text-slate-500">
                       Feedback recorded: {user.feedbackData?.length || 0} rounds
@@ -645,16 +726,12 @@ const groupGrids = useMemo(() => {
             </button>
           </form>
 
-          {/* COMMENT OUT THIS BUTTON IF WANTED */}
-
           <button
             onClick={() => setViewMode("admin")}
             className="w-full mt-8 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-blue-600 transition-colors"
           >
             <ShieldCheck size={14} /> Admin Access
           </button>
-
-          
         </div>
       </div>
     );
