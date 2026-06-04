@@ -45,6 +45,16 @@ export default function Gatekeeper() {
   const [loginInput, setLoginInput] = useState("");
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("admin") === "true") {
+      console.log("Admin access granted via URL parameter.");
+      setViewMode("admin");
+    } else {
+      console.log("Standard user access.");
+    }
+  }, []);
+
   // Fetch Master User List for verification
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "users"), (snap) => {
@@ -134,6 +144,22 @@ export default function Gatekeeper() {
       setPotentialMatches(registeredMatches);
     }
   };
+
+  // 4. Auto login if URL contains a valid userId and eventId params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlUserId = params.get("userId");
+    const urlEventId = params.get("eventId");
+    if (urlUserId && urlEventId) {
+      const reg = attendees.find((r) => r.userId === urlUserId);
+      if (reg) {        
+        const userProfile = masterUsers.find((u) => u.id === urlUserId);
+        if (userProfile) {
+          setMyProfile({ ...reg, ...userProfile, registrationId: reg.id });
+        }
+      }
+    }
+  }, [attendees, masterUsers]);
 
   // --- ADMIN ACTIONS ---
   const handleAdminSubmit = async () => {

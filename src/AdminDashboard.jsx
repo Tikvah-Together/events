@@ -1076,6 +1076,13 @@ const deleteUserFromMaster = async (userId, name) => {
         >
           Master Singles List
         </button>
+        <button
+            onClick={() => window.open('/event?admin=true', '_blank')}
+            className="px-6 py-4 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 transition-colors shadow-sm flex items-center gap-2"
+            title="Open Gatekeeper View"
+          >
+            Table View ↗
+          </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">

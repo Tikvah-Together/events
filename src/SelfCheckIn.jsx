@@ -17,6 +17,8 @@ const SelfCheckIn = () => {
   const [firstName, setFirstName] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [tableNumber, setTableNumber] = useState("");
+  const [userId, setUserId] = useState("");
+  const [eventId, setEventId] = useState("");
 
 const handleCheckIn = async (e) => {
     e.preventDefault();
@@ -38,18 +40,21 @@ const handleCheckIn = async (e) => {
       }
       
       const eventDoc = eventSnap.docs[0];
-      const eventId = eventDoc.id;
+      const currentEventId = eventDoc.id;
+      setEventId(currentEventId); 
       const eventData = eventDoc.data();
 
       // 2. Find the user by Email or Phone
       const cleanInput = input.trim().toLowerCase();
       const userQuery = query(collection(db, "users"), where("email", "==", cleanInput));
       let userSnap = await getDocs(userQuery);
+      console.log("User query results with email:", userSnap.size);
 
       if (userSnap.empty) {
         const phoneInput = input.replace(/\D/g, "");
         const phoneQuery = query(collection(db, "users"), where("phone", "==", phoneInput));
         userSnap = await getDocs(phoneQuery);
+        console.log("User query results with phone:", userSnap.size);
       }
 
       if (userSnap.empty) {
@@ -59,18 +64,20 @@ const handleCheckIn = async (e) => {
       }
 
       const userDoc = userSnap.docs[0];
-      const userId = userDoc.id;
+      const currentUserId = userDoc.id;
+      setUserId(currentUserId); 
       const userData = userDoc.data();
 
-      // 3. Find the registration
+      // 3. Find the registration using the LOCAL variables, not the state!
       const regQuery = query(
         collection(db, "registrations"),
-        where("userId", "==", userId),
-        where("eventId", "==", eventId)
+        where("userId", "==", currentUserId),
+        where("eventId", "==", currentEventId)
       );
       const regSnap = await getDocs(regQuery);
 
       if (regSnap.empty) {
+        console.warn(`User ${currentUserId} is not registered for event ${currentEventId}`);
         setErrorMsg("You are not registered for this specific event.");
         setStep("input");
         return;
@@ -101,7 +108,7 @@ const handleCheckIn = async (e) => {
 
       // Fetch all check-ins to find the next number
       const allRegsSnap = await getDocs(
-        query(collection(db, "registrations"), where("eventId", "==", eventId))
+        query(collection(db, "registrations"), where("eventId", "==", currentEventId))
       );
       const allRegs = allRegsSnap.docs.map((d) => d.data());
 
@@ -170,7 +177,7 @@ const handleCheckIn = async (e) => {
             <div className="text-6xl font-black text-blue-900 mt-2">{tableNumber}</div>
           </div>
           <div className="text-sm text-slate-500 mt-6">
-            Please proceed to your assigned table. Once you arrive there, go <a href="/event" className="text-blue-900 font-bold underline">here</a> to start the event.
+            Please proceed to your assigned table. Once you arrive there, go <a href={`/event?eventId=${eventId}&userId=${userId}`} className="text-blue-900 font-bold underline">here</a> to start the event.
           </div>
         </div>
       </div>
