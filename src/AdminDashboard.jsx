@@ -26,6 +26,7 @@ import {
   ChevronDown,
   Pause,
   Bell,
+  AlertCircle
 } from "lucide-react";
 
 export default function AdminDashboard() {
@@ -415,8 +416,33 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
         eventLabel: `${prefix}${assignedNumber}-${groupSuffix}`,
         tableNumber: assignedNumber,
       });
+
+      sendAutomatedCheckInEmail(userData, eventData);
     } catch (err) {
       console.error("Check-in error:", err);
+    }
+  };
+
+  const sendAutomatedCheckInEmail = async (userData, eventData) => {
+    const eventURL = `https://events.tikvahtogether.org/event?userId=${userData.userId}&eventId=${eventData.id}`;
+
+    try {
+      await addDoc(collection(db, "email"), {
+        to: userData.email,
+        message: {
+          subject: "SY SmartMatch: Event Login & Check-In Confirmation",
+          html: `
+      <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
+        <p>Hi ${userData.firstName},</p>
+        <p>Here is your SY SmartMatch event login link:</p>
+        <p style="margin-top: 30px;">${eventURL}</p>
+        <p style="font-weight: bold; color: #1E3D34;">SY SmartMatch Team</p>
+      </div>
+    `,
+        },
+      });
+    } catch (err) {
+      console.error("Error sending individual reminder:", err);
     }
   };
 
@@ -1059,6 +1085,44 @@ const deleteUserFromMaster = async (userId, name) => {
 
     return { overall, groupStats };
   }, [filteredMasterList, filteredAttendees, activeTab]);
+
+  const tableErrors = useMemo(() => {
+    if (activeTab !== "events" || !selectedEvent) return [];
+    const errors = [];
+    const groups = {};
+
+    attendees.forEach(a => {
+      const t = parseInt(a.tableNumber, 10);
+      if (!t || isNaN(t) || t <= 0) return; // Only validate actually assigned tables
+
+      const g = a.groupId || "Unassigned";
+      if (!groups[g]) groups[g] = { boys: [], girls: [] };
+
+      const isMale = ["man", "boy", "male"].includes((a.gender || "").toLowerCase());
+      if (isMale) groups[g].boys.push(t);
+      else groups[g].girls.push(t);
+    });
+
+    for (const [groupId, data] of Object.entries(groups)) {
+      const checkSequence = (arr, genderLabel) => {
+        if (arr.length === 0) return;
+        const sorted = [...arr].sort((a, b) => a - b);
+        const unique = new Set(sorted);
+        
+        if (unique.size !== sorted.length) {
+          errors.push(`Group "${groupId}" (${genderLabel}): Duplicate table numbers detected.`);
+        }
+        
+        const max = Math.max(...sorted);
+        if (max !== unique.size) {
+          errors.push(`Group "${groupId}" (${genderLabel}): Gap in table numbers (Expected 1 through ${max}).`);
+        }
+      };
+      checkSequence(data.boys, "Men");
+      checkSequence(data.girls, "Women");
+    }
+    return errors;
+  }, [attendees, activeTab, selectedEvent]);
 
   return (
     <div className="flex flex-col bg-transparent">
@@ -1800,6 +1864,19 @@ const deleteUserFromMaster = async (userId, name) => {
                     </div>
                   )}
                 </div>
+
+                {/* TABLE ERRORS WARNING */}
+                {tableErrors.length > 0 && (
+                  <div className="mb-6 bg-red-50 border border-red-200 p-4 rounded-xl shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertCircle className="text-red-600" size={20} />
+                      <h3 className="text-red-800 font-bold text-lg">Table Assignment Errors</h3>
+                    </div>
+                    <ul className="list-disc list-inside pl-2 text-red-600 text-sm font-medium space-y-1">
+                      {tableErrors.map((err, i) => <li key={i}>{err}</li>)}
+                    </ul>
+                  </div>
+                )}
 
                 {/* STATISTICS SUMMARY BAR */}
                 <div className="flex flex-wrap gap-4 mb-4">

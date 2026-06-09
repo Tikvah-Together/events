@@ -16,6 +16,7 @@ const SelfCheckIn = () => {
   const [step, setStep] = useState("input"); // input, loading, success, error
   const [firstName, setFirstName] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [group, setGroup] = useState("");
   const [tableNumber, setTableNumber] = useState("");
   const [userId, setUserId] = useState("");
   const [eventId, setEventId] = useState("");
@@ -90,6 +91,7 @@ const handleCheckIn = async (e) => {
       const regRef = doc(db, "registrations", regDoc.id);
 
       if (regData.checkedIn) {
+        setGroup(regData.groupId || "Unassigned");
         setTableNumber(regData.tableNumber || 0);
         setStep("success");
         return;
@@ -143,14 +145,38 @@ const handleCheckIn = async (e) => {
       });
 
       setTableNumber(newTableNumber);
+      setGroup(regData.groupId || "Unassigned");
       setStep("success");
-      
+      await sendAutomatedCheckInEmail(userData, eventData);
     } catch (err) {
       console.error(err);
       setErrorMsg(err.message || "An error occurred.");
       setStep("input");
     }
   };
+
+    const sendAutomatedCheckInEmail = async (userData, eventData) => {
+      const eventURL = `https://events.tikvahtogether.org/event?userId=${userData.userId}&eventId=${eventData.id}`;
+  
+      try {
+        await addDoc(collection(db, "email"), {
+          to: userData.email,
+          message: {
+            subject: "SY SmartMatch: Event Login & Check-In Confirmation",
+            html: `
+        <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
+          <p>Hi ${userData.firstName},</p>
+          <p>Here is your SY SmartMatch event login link:</p>
+          <p style="margin-top: 30px;">${eventURL}</p>
+          <p style="font-weight: bold; color: #1E3D34;">SY SmartMatch Team</p>
+        </div>
+      `,
+          },
+        });
+      } catch (err) {
+        console.error("Error sending individual reminder:", err);
+      }
+    };
 
   if (step === "loading") {
     return (
@@ -175,6 +201,7 @@ const handleCheckIn = async (e) => {
           <div className="bg-blue-50 rounded-xl p-6">
             <span className="text-xs uppercase tracking-widest text-blue-600 font-bold">Your Starting Table</span>
             <div className="text-6xl font-black text-blue-900 mt-2">{tableNumber}</div>
+            <p className="text-slate-500 mt-2">Your Group: <span className="font-bold">{group}</span></p>
           </div>
           <div className="text-sm text-slate-500 mt-6">
             Please proceed to your assigned table. Once you arrive there, go <a href={`/event?eventId=${eventId}&userId=${userId}`} className="text-blue-900 font-bold underline">here</a> to start the event.
