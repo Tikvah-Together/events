@@ -1,7 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
 import RegistrationForm from "./RegistrationForm";
 import AdminDashboard from "./AdminDashboard";
-import Gatekeeper from "./Gatekeeper";
+import Event from "./Event";
 import AdminGuard from "./AdminGuard";
 import SelfCheckIn from "./SelfCheckIn";
 import { Tablet, ShieldCheck, UserPlus } from "lucide-react";
@@ -68,75 +68,55 @@ function Home() {
   );
 }
 
+function AppLayout() {
+  return (
+    <div id="global-app-wrapper" className="min-h-screen flex flex-col bg-linear-to-b from-[#95B699] from-0% to-[#dde7de] to-20% transition-colors duration-500">
+      <nav className="border-b-0 border-white/20 py-6 shrink-0">
+        <div className="max-w-6xl mx-auto px-6 flex justify-between items-center">
+          <Link
+            to="/"
+            className="flex flex-col hover:opacity-90 transition-opacity"
+          >
+            <div className="text-xl md:text-2xl font-bold tracking-tighter text-[#1E3D34] leading-none flex items-start">
+              SY SmartMatch
+            </div>
+            <span className="text-[10px] md:text-xs font-semibold text-[#1E3D34]/70 tracking-widest uppercase mt-1">
+              by Tikvah Together
+            </span>
+          </Link>
+        </div>
+      </nav>
+
+      <main className="flex-1 flex flex-col">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/register" element={<RegistrationForm />} />
+          <Route path="/event" element={<Event />} />
+          <Route
+            path="/admin"
+            element={
+              <AdminGuard>
+                <AdminDashboard />
+              </AdminGuard>
+            }
+          />
+          <Route path="/rsvp" element={<RsvpPage />} />
+          <Route path="/selfcheckin" element={<SelfCheckIn />} />
+        </Routes>
+      </main>
+
+      <footer className="py-8 border-white/20 text-center text-[#1E3D34]/50 text-sm">
+        © {new Date().getFullYear()} Tikvah Together.
+      </footer>
+    </div>
+  );
+}
+
+// 4. App simply wraps the Layout in the Router
 function App() {
   return (
     <Router>
-      <div className="min-h-screen bg-linear-to-b from-[#95B699] from-0% to-[#dde7de] to-20% flex flex-col">
-        <nav className="border-b-0 border-white/20 py-6 shrink-0">
-          <div className="max-w-6xl mx-auto px-6 flex justify-between items-center">
-            <Link
-              to="/"
-              className="flex flex-col hover:opacity-90 transition-opacity"
-            >
-              <div className="text-xl md:text-2xl font-bold tracking-tighter text-[#1E3D34] leading-none flex items-start">
-                SY SmartMatch
-              </div>
-              <span className="text-[10px] md:text-xs font-semibold text-[#1E3D34]/70 tracking-widest uppercase mt-1">
-                by Tikvah Together
-              </span>
-            </Link>
-
-            {/* 
-
-            <div className="flex space-x-4 md:space-x-8 text-[10px] md:text-xs uppercase tracking-widest font-bold text-slate-400">
-              <Link
-                to="/register"
-                className="hover:text-blue-900 transition-colors"
-              >
-                Register
-              </Link>
-              <Link
-                to="/event"
-                className="hover:text-orange-600 transition-colors"
-              >
-                Event Login
-              </Link>
-              <Link
-                to="/admin"
-                className="hover:text-blue-900 transition-colors"
-              >
-                Admin
-              </Link>
-              
-              
-            </div>
-
-            */}
-          </div>
-        </nav>
-
-        <main className="flex-1">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/register" element={<RegistrationForm />} />
-            <Route path="/event" element={<Gatekeeper />} />
-            <Route
-              path="/admin"
-              element={
-                <AdminGuard>
-                  <AdminDashboard />
-                </AdminGuard>
-              }
-            />
-            <Route path="/rsvp" element={<RsvpPage />} />
-            <Route path="/selfcheckin" element={<SelfCheckIn />} />
-          </Routes>
-        </main>
-
-        <footer className="py-8 border-t border-white/20 text-center text-[#1E3D34]/50 text-sm shrink-0">
-          © {new Date().getFullYear()} Tikvah Together.
-        </footer>
-      </div>
+      <AppLayout />
     </Router>
   );
 }

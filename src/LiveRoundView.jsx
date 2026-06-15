@@ -24,7 +24,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
   const [tableAnswer, setTableAnswer] = useState("");
   const [optionalNotes, setOptionalNotes] = useState("");
   const containerRef = useRef(null);
-  const debugging = true; // Set to true to show the debug overlay
+  const debugging = false; // Set to true to show the debug overlay
   const [showDebug, setShowDebug] = useState(false);
 
   // This logic runs every time the partner changes
@@ -34,12 +34,12 @@ export default function LiveRoundView({ event, user, attendees, users }) {
 
     // If user is a male Kohen and partner is female divorced, return false
     if (
-      me.isKohen &&
+      me.isKohen === true &&
       me.gender === "man" &&
       partner.gender === "woman" &&
       partner.maritalStatus === "Divorced"
     ) {
-      console.log("Kohen compatibility failed.");
+      console.log(me.firstName + " " + me.lastName + " is a Kohen and " + partner.firstName + " " + partner.lastName + " is divorced. Not a match. Skipping.");
       return false;
     }
 
@@ -154,12 +154,10 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     ...new Set(groupAttendees.map((a) => a.tableNumber)),
   ];
 
-  // CRITICAL FIX: If we can't find any other tables, we check the event settings
-  // or default to a reasonable number to prevent immediate event ending.
   const totalTablesInGroup =
-    uniqueTablesInGroup.length > 1
+    uniqueTablesInGroup.length >= 1
       ? uniqueTablesInGroup.length
-      : event.maxRounds || 10; // Fallback to event setting if group detection fails
+      : event.totalTables || 10; // Fallback to event setting if group detection fails
 
   // --- 3. MATH & STOP LOGIC ---
   const startTime = event.startTime.toDate();
@@ -210,12 +208,13 @@ export default function LiveRoundView({ event, user, attendees, users }) {
         ? 0
         : roundTimeSeconds - timeInCurrentBlock;
 
-  // --- 4. TABLE ROTATION (STRING AWARE) ---
+  // --- 4. TABLE ROTATION ---
   let activeNum = startTableNum;
   if (user.gender === "man") {
     // Man rotates: (Start + RoundOffset) % Total
     activeNum =
       ((startTableNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
+      console.log("Current round:", currentRound, " | User is a man, so active table is:", activeNum);
   }
 
   const nextNum =
@@ -229,6 +228,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     ? `Table ${nextNum} - ${groupName}`
     : activeRoundTable;
 
+  // reset decision state when state changes
   useEffect(() => {
     setDecisionMade(false);
   }, [currentRound]);
@@ -245,13 +245,11 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     if (attendeeUser.gender === user.gender) return false;
 
     // 2. Group check
-    const pTableString = a.tableNumber || 0;
-    if (!pTableString.toLowerCase().includes(`- ${groupName.toLowerCase()}`))
+    if (!a.groupId.toLowerCase().includes(groupName.toLowerCase()))
       return false;
 
     // 3. Table Calculation
-    const pTablePart = pTableString.split(" - ")[0] || "Table 1";
-    const pStartNum = parseInt(pTablePart.replace("Table ", ""), 10) || 1;
+    const pStartNum = a.tableNumber || 0;
     let pCurrentNum = pStartNum;
 
     if (attendeeUser.gender === "man") {
@@ -370,13 +368,49 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     if (isEventStarting && !isFullscreen && !hasStarted) {
       return (
         <div className="flex flex-col items-center justify-center p-10 text-center">
-          <h1 className="text-4xl font-black mb-8">Ready to Start?</h1>
+          <h1 className="text-4xl text-[#1E3D34] font-black mb-8">
+            Ready to Start?
+          </h1>
           <button
             onClick={enterFullscreen}
-            className="flex items-center gap-4 bg-blue-600 px-12 py-6 rounded-3xl text-3xl font-bold shadow-2xl active:scale-95 transition-transform"
+            className="flex items-center gap-4 bg-[#1E3D34] px-12 py-6 rounded-3xl text-3xl text-white font-bold shadow-2xl active:scale-95 transition-transform"
           >
             <Maximize size={40} /> Enter Fullscreen
           </button>
+        </div>
+      );
+    }
+
+    if (event.isPaused) {
+      return (
+        <div className="flex flex-col items-center justify-center p-10 text-center animate-in zoom-in-95 duration-500">
+          {/* 1. Use a more sophisticated container for the icon */}
+          <div className="relative mb-10">
+            <div className="absolute inset-0 bg-[#EAB308]/20 rounded-full blur-2xl animate-pulse" />
+            <div className="relative bg-white/50 p-8 rounded-full border-4 border-white shadow-xl">
+              <Coffee size={80} className="text-[#EAB308]" />
+            </div>
+            {/* Status indicator pill */}
+            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#1E3D34] text-white text-xs px-4 py-1 rounded-full font-bold uppercase tracking-widest shadow-lg">
+              Paused
+            </div>
+          </div>
+
+          {/* 2. Clear, high-contrast headings */}
+          <h1 className="text-4xl md:text-5xl font-black text-[#1E3D34] mb-4 uppercase tracking-tight">
+            Event Paused
+          </h1>
+          <p className="text-xl text-[#1E3D34]/70 max-w-sm leading-relaxed font-medium">
+            Relax, grab a drink, and enjoy the moment. We’ll be back shortly.
+          </p>
+
+          {/* 3. Small visual cue that the app is still active */}
+          <div className="mt-12 flex items-center gap-2 opacity-50">
+            <div className="w-2 h-2 bg-yellow-500 rounded-full animate-ping" />
+            <span className="text-xs font-bold uppercase tracking-widest text-[#1E3D34]">
+              Live Event Sync Active
+            </span>
+          </div>
         </div>
       );
     }
@@ -394,7 +428,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
                 />
                 <h1 className="text-6xl font-black">All Done!</h1>
               </div>
-              <p className="text-2xl text-slate-400 mt-4">
+              <p className="text-2xl text-[#1E3D34] mt-4">
                 Thanks for participating in this event. We hope you had a great
                 time and made some meaningful connections.
               </p>
@@ -409,18 +443,29 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     // C. STARTING BUFFER
     if (isEventStarting) {
       return (
-        <div className="flex flex-col items-center justify-center p-10 text-center">
-          <MapPin size={80} className="mb-6 animate-bounce text-white" />
-          <h1 className="text-5xl font-black mb-4 uppercase">
+        <div className="flex flex-col items-center justify-center p-10 text-center animate-in fade-in duration-700">
+          <MapPin size={80} className="mb-6 animate-bounce text-[#1E3D34]" />
+          <h1 className="text-4xl md:text-5xl text-[#1E3D34] font-black mb-8 uppercase tracking-tight">
             Find Your Table
           </h1>
-          <div className="bg-white text-blue-700 rounded-3xl p-10 shadow-2xl">
-            <p className="text-9xl font-black">{startTableNum}</p>
-            <p className="text-xl font-bold mt-2">{groupName}</p>
+
+          {/* THE FIX: Added bg-white, a subtle border, and adjusted the border radius/padding */}
+          <div className="bg-white text-[#1E3D34] rounded-[3rem] px-16 py-12 shadow-2xl border-4 border-white/50 relative overflow-hidden">
+            <p className="text-8xl md:text-9xl font-black leading-none drop-shadow-sm">
+              {startTableNum}
+            </p>
+            <p className="text-xl md:text-2xl font-bold mt-4 uppercase tracking-widest text-[#1E3D34]/70">
+              {groupName}
+            </p>
           </div>
-          <p className="mt-10 text-xl font-medium">
-            Starting in {secondsLeft}s
-          </p>
+
+          {/* THE TIMER: Wrapped in a dark pill to contrast heavily against the light background */}
+          <div className="mt-12 bg-[#1E3D34] text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-3">
+            <span className="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.6)]" />
+            <p className="text-lg font-bold tracking-widest">
+              STARTING IN {secondsLeft}s
+            </p>
+          </div>
         </div>
       );
     }
@@ -432,16 +477,18 @@ export default function LiveRoundView({ event, user, attendees, users }) {
           {/* Skip feedback if decision made, no partner found, or partner was not a match */}
           {decisionMade || !partner || !isMatch ? (
             <>
-              <h1 className="text-4xl font-black mb-12 uppercase">
+              <h1 className="text-4xl text-[#1E3D34] font-black mb-12 uppercase">
                 {user.gender === "woman" ? "Stay at Table" : "Move to Table"}
               </h1>
-              <div className="bg-white text-slate-900 rounded-full w-64 h-64 flex flex-col items-center justify-center shadow-2xl mb-8 mx-auto border-12 border-blue-500">
-                <p className="text-9xl font-black leading-none">{nextNum}</p>
+              <div className="text-slate-900 rounded-full w-64 h-64 flex flex-col items-center justify-center mb-8 mx-auto border-12 border-[#1E3D34]">
+                <p className="text-9xl text-[#1E3D34] font-black leading-none">
+                  {nextNum}
+                </p>
               </div>
-              <p className="text-xl font-bold text-slate-400 mb-4">
+              <p className="text-xl text-[#1E3D34] font-bold mb-4">
                 {groupName}
               </p>
-              <p className="text-3xl font-mono text-blue-400">
+              <p className="text-3xl text-[#1E3D34] font-mono">
                 Next Round: {secondsLeft}s
               </p>
             </>
@@ -452,41 +499,20 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       );
     }
 
-    if (event.isPaused) {
-      return (
-        <div className="flex flex-col items-center justify-center p-10 text-center">
-          <div className="relative">
-            <Coffee
-              size={120}
-              className="text-yellow-500 mb-8 animate-bounce"
-            />
-            <div className="absolute top-0 right-0 bg-red-500 text-white text-xs px-2 py-1 rounded-full font-bold">
-              PAUSED
-            </div>
-          </div>
-          <h1 className="text-5xl font-black mb-4">Event Paused</h1>
-          <p className="text-2xl text-slate-400">
-            The organizer has temporarily paused the event. <br />
-            Grab a drink—we'll be back shortly!
-          </p>
-        </div>
-      );
-    }
-
     // E. ACTIVE DATING OR BREAK PHASE
     if (!partner || !isMatch) {
       return (
         <div className="flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-700">
-          <Coffee size={100} className="text-blue-400 mb-8 animate-pulse" />
+          <Coffee size={100} className="text-[#1E3D34] mb-8 animate-pulse" />
           <h2 className="text-6xl font-black mb-4 italic text-white">
-            Break Time!
+            Short Break!
           </h2>
-          <p className="text-2xl text-slate-400 max-w-md leading-relaxed">
-            You don't have a match this round. Grab a drink, stretch, and get
-            ready for the next one!
+          <p className="text-2xl text-[#1E3D34] max-w-md leading-relaxed">
+            No match this round. Please stay nearby. The next round will begin
+            shortly.
           </p>
           <div className="mt-12 bg-slate-800 px-10 py-5 rounded-full border border-slate-700">
-            <p className="text-4xl font-mono font-bold text-blue-400">
+            <p className="text-4xl font-mono font-bold text-white">
               {Math.floor(secondsLeft / 60)}:
               {(secondsLeft % 60).toString().padStart(2, "0")}
             </p>
@@ -502,10 +528,10 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     return (
       <div className="flex flex-col items-center justify-center p-6 text-center">
         <div className="mb-12">
-          <p className="text-blue-400 font-black uppercase text-sm mb-2">
+          <p className="text-black font-black uppercase text-sm mb-2">
             Round {currentRound} of {totalPotentialRounds}
           </p>
-          <div className="inline-block px-6 py-2 bg-slate-800 rounded-full border border-slate-700 text-xl font-bold">
+          <div className="inline-block px-6 py-2 bg-slate-800 rounded-full border border-slate-700 text-xl text-white font-bold">
             Table {activeNum} <span className="text-slate-500 mx-2">|</span>{" "}
             {groupName}
           </div>
@@ -517,7 +543,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
           {partner?.firstName + " " + partner?.lastName}
         </h2>
         <div className="bg-slate-800 px-16 py-8 rounded-[3rem] border-2 border-slate-700 shadow-2xl">
-          <p className="text-7xl font-mono font-bold text-blue-400">
+          <p className="text-7xl font-mono font-bold text-white">
             {Math.floor(secondsLeft / 60)}:
             {(secondsLeft % 60).toString().padStart(2, "0")}
           </p>
@@ -528,17 +554,6 @@ export default function LiveRoundView({ event, user, attendees, users }) {
 
   const FeedbackForm = () => (
     <div className="w-full max-w-xl text-center">
-      {/* <h2 className="text-2xl font-bold mb-2 text-slate-300">
-      Quick check: What table are you at?
-    </h2>
-    <input
-      type="text" // Changed to text as tableNumber is now "Table X - Group"
-      className="w-full max-w-sm p-4 text-center border-2 border-slate-700 bg-slate-800 rounded-xl mb-8 text-2xl text-white font-black"
-      placeholder="1"
-      value={tableAnswer}
-      onChange={(e) => setTableAnswer(e.target.value)}
-    /> */}
-
       <h1 className="text-5xl font-black mb-12 text-white">
         How was {partner?.firstName + " " + partner?.lastName}?
       </h1>
@@ -549,7 +564,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
           onClick={() => setPendingSelection("yes")}
           className={`py-6 rounded-2xl text-3xl font-black border-2 transition-all ${
             pendingSelection === "yes"
-              ? "bg-[#95B699] border-[#1E3D34] text-[#1E3D34]"
+              ? "bg-green-500 border-[#1E3D34] text-white"
               : "bg-white border-transparent text-[#1E3D34]"
           }`}
         >
@@ -581,7 +596,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
           onClick={() => setPendingSelection("no")}
           className={`py-4 rounded-2xl text-xl font-bold border-2 transition-all ${
             pendingSelection === "no"
-              ? "bg-[#95B699] border-[#1E3D34] text-[#1E3D34]"
+              ? "bg-red-400 border-[#1E3D34] text-white"
               : "bg-white border-transparent text-[#1E3D34]"
           }`}
         >
@@ -686,7 +701,12 @@ export default function LiveRoundView({ event, user, attendees, users }) {
   return (
     <div
       ref={containerRef}
-      className="min-h-screen bg-slate-900 text-white flex flex-col justify-center items-center overflow-hidden"
+      className={`relative w-full flex-1 flex flex-col items-center justify-center ${
+        isFullscreen
+          ? // Lock it to the screen and apply the STANDARD background when fullscreen
+            "fixed inset-0 z-50 bg-linear-to-b from-[#95B699] from-0% to-[#dde7de] to-20% overflow-y-auto"
+          : ""
+      }`}
     >
       {renderMainContent()}
 
