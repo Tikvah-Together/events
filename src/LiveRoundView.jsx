@@ -7,7 +7,7 @@ import {
   Maximize,
   Star,
   AlertCircle,
-  Coffee,
+  Pause,
 } from "lucide-react";
 
 export default function LiveRoundView({ event, user, attendees, users }) {
@@ -39,7 +39,16 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       partner.gender === "woman" &&
       partner.maritalStatus === "Divorced"
     ) {
-      console.log(me.firstName + " " + me.lastName + " is a Kohen and " + partner.firstName + " " + partner.lastName + " is divorced. Not a match. Skipping.");
+      console.log(
+        me.firstName +
+          " " +
+          me.lastName +
+          " is a Kohen and " +
+          partner.firstName +
+          " " +
+          partner.lastName +
+          " is divorced. Not a match. Skipping.",
+      );
       return false;
     }
 
@@ -61,6 +70,19 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       setShowPriorityConfirm(true);
     } else {
       setIsPriority(!isPriority);
+    }
+  };
+
+  const formatTime = (totalSeconds) => {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    if (minutes > 0 && seconds > 0) {
+      return `${minutes} minute${minutes > 1 ? "s" : ""} and ${seconds} second${seconds !== 1 ? "s" : ""}`;
+    } else if (minutes > 0) {
+      return `${minutes} minute${minutes > 1 ? "s" : ""}`;
+    } else {
+      return `${seconds} second${seconds !== 1 ? "s" : ""}`;
     }
   };
 
@@ -160,48 +182,43 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       : event.totalTables || 10; // Fallback to event setting if group detection fails
 
   // --- 3. MATH & STOP LOGIC ---
+  // --- 3. MATH & STOP LOGIC ---
   const startTime = event.startTime.toDate();
-  // If paused, we calculate time based on when the pause started
-  // If not paused, we use the current time (now)
   const effectiveNow = event.isPaused ? event.pausedAt.toDate() : now;
   const secondsSinceStart = Math.floor((effectiveNow - startTime) / 1000);
-  const prepBuffer = 60; // 1 minute buffer at the start before any rounds begin to allow people to find their tables and get settled
-  const roundTimeSeconds = (event.roundTime || 7) * 60;
-  const roundLengthPlusMove = roundTimeSeconds + prepBuffer;
 
-  const isEventStarting = secondsSinceStart < prepBuffer;
-  const secondsAfterPrep = secondsSinceStart - prepBuffer;
+  // 1. Separate the buffers
+  const startBuffer = 60; // 1 minute for the initial start
+  const moveBuffer = 120; // 2 minutes for moving between tables (1 + 1)
+
+  const roundTimeSeconds = (event.roundTime || 7) * 60;
+
+  // 2. Update the logic to use the specific buffer for the cycle
+  const roundLengthPlusMove = roundTimeSeconds + moveBuffer;
+
+  const isEventStarting = secondsSinceStart < startBuffer;
+  const secondsAfterStart = secondsSinceStart - startBuffer;
 
   // Determine current round
   const currentRound = isEventStarting
     ? 1
-    : Math.floor(secondsAfterPrep / roundLengthPlusMove) + 1;
+    : Math.floor(secondsAfterStart / roundLengthPlusMove) + 1;
 
-  // We use the total potential rounds to decide when the event is "Over"
-  const totalPotentialRounds = totalTablesInGroup;
-
+  // 3. Update the transition and time calculations
   const timeInCurrentBlock = isEventStarting
     ? 0
-    : secondsAfterPrep % roundLengthPlusMove;
+    : secondsAfterStart % roundLengthPlusMove;
 
-  const isLastRound = currentRound === totalPotentialRounds;
+  const isLastRound = currentRound === totalTablesInGroup;
   const isEventOver =
-    currentRound > totalPotentialRounds ||
+    currentRound > totalTablesInGroup ||
     (isLastRound && timeInCurrentBlock >= roundTimeSeconds);
+
   const isMoving =
     !isEventStarting && !isEventOver && timeInCurrentBlock >= roundTimeSeconds;
 
-  // Reset local decision state for the new round
-  useEffect(() => {
-    if (!isEventOver) {
-      setDecisionMade(false);
-    }
-    setIsPriority(false); // Reset priority toggle for the new person
-    setOptionalNotes("");
-  }, [currentRound]);
-
   const secondsLeft = isEventStarting
-    ? prepBuffer - secondsSinceStart
+    ? startBuffer - secondsSinceStart
     : isMoving
       ? roundLengthPlusMove - timeInCurrentBlock
       : isEventOver
@@ -214,7 +231,12 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     // Man rotates: (Start + RoundOffset) % Total
     activeNum =
       ((startTableNum + (currentRound - 1) - 1) % totalTablesInGroup) + 1;
-      console.log("Current round:", currentRound, " | User is a man, so active table is:", activeNum);
+    console.log(
+      "Current round:",
+      currentRound,
+      " | User is a man, so active table is:",
+      activeNum,
+    );
   }
 
   const nextNum =
@@ -369,13 +391,13 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       return (
         <div className="flex flex-col items-center justify-center p-10 text-center">
           <h1 className="text-4xl text-[#1E3D34] font-black mb-8">
-            Ready to Start?
+            Event in Progress
           </h1>
           <button
             onClick={enterFullscreen}
             className="flex items-center gap-4 bg-[#1E3D34] px-12 py-6 rounded-3xl text-3xl text-white font-bold shadow-2xl active:scale-95 transition-transform"
           >
-            <Maximize size={40} /> Enter Fullscreen
+            <Maximize size={40} /> Enter Fullscreen to Begin
           </button>
         </div>
       );
@@ -388,7 +410,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
           <div className="relative mb-10">
             <div className="absolute inset-0 bg-[#EAB308]/20 rounded-full blur-2xl animate-pulse" />
             <div className="relative bg-white/50 p-8 rounded-full border-4 border-white shadow-xl">
-              <Coffee size={80} className="text-[#EAB308]" />
+              <Pause size={80} className="text-[#EAB308]" />
             </div>
             {/* Status indicator pill */}
             <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-[#1E3D34] text-white text-xs px-4 py-1 rounded-full font-bold uppercase tracking-widest shadow-lg">
@@ -401,7 +423,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
             Event Paused
           </h1>
           <p className="text-xl text-[#1E3D34]/70 max-w-sm leading-relaxed font-medium">
-            Relax, grab a drink, and enjoy the moment. We’ll be back shortly.
+            Please stay nearby. The event will resume soon.
           </p>
 
           {/* 3. Small visual cue that the app is still active */}
@@ -429,8 +451,8 @@ export default function LiveRoundView({ event, user, attendees, users }) {
                 <h1 className="text-6xl font-black">All Done!</h1>
               </div>
               <p className="text-2xl text-[#1E3D34] mt-4">
-                Thanks for participating in this event. We hope you had a great
-                time and made some meaningful connections.
+                Thanks for joining us tonight. Keep an eye on your email for
+                match updates.
               </p>
             </div>
           ) : (
@@ -446,7 +468,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
         <div className="flex flex-col items-center justify-center p-10 text-center animate-in fade-in duration-700">
           <MapPin size={80} className="mb-6 animate-bounce text-[#1E3D34]" />
           <h1 className="text-4xl md:text-5xl text-[#1E3D34] font-black mb-8 uppercase tracking-tight">
-            Find Your Table
+            Your Starting Table
           </h1>
 
           {/* THE FIX: Added bg-white, a subtle border, and adjusted the border radius/padding */}
@@ -489,7 +511,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
                 {groupName}
               </p>
               <p className="text-3xl text-[#1E3D34] font-mono">
-                Next Round: {secondsLeft}s
+                Next Round: {formatTime(secondsLeft)}
               </p>
             </>
           ) : (
@@ -505,7 +527,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
         <div className="flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-700">
           <Coffee size={100} className="text-[#1E3D34] mb-8 animate-pulse" />
           <h2 className="text-6xl font-black mb-4 italic text-white">
-            Short Break!
+            Short Break
           </h2>
           <p className="text-2xl text-[#1E3D34] max-w-md leading-relaxed">
             No match this round. Please stay nearby. The next round will begin
@@ -513,8 +535,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
           </p>
           <div className="mt-12 bg-slate-800 px-10 py-5 rounded-full border border-slate-700">
             <p className="text-4xl font-mono font-bold text-white">
-              {Math.floor(secondsLeft / 60)}:
-              {(secondsLeft % 60).toString().padStart(2, "0")}
+              {formatTime(secondsLeft)}
             </p>
           </div>
           <p className="mt-6 text-slate-500 font-bold uppercase tracking-widest">
@@ -529,7 +550,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       <div className="flex flex-col items-center justify-center p-6 text-center">
         <div className="mb-12">
           <p className="text-black font-black uppercase text-sm mb-2">
-            Round {currentRound} of {totalPotentialRounds}
+            Round {currentRound} of {totalTablesInGroup}
           </p>
           <div className="inline-block px-6 py-2 bg-slate-800 rounded-full border border-slate-700 text-xl text-white font-bold">
             Table {activeNum} <span className="text-slate-500 mx-2">|</span>{" "}
@@ -648,7 +669,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
           </p>
           <p>
             <span className="text-slate-500">Current Round:</span>{" "}
-            {currentRound} / {totalPotentialRounds}
+            {currentRound} / {totalTablesInGroup}
           </p>
           <p>
             <span className="text-slate-500">Time State:</span>{" "}

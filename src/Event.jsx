@@ -401,21 +401,21 @@ export default function Event() {
     </div>
   );
 
-  useEffect(() => {
-    const appWrapper = document.getElementById("global-app-wrapper");
+useEffect(() => {
+  const appWrapper = document.getElementById("global-app-wrapper");
 
-    if (appWrapper && !myProfile) {
-      // Apply the reversed gradient for the login screen
-      appWrapper.className = "min-h-screen flex flex-col bg-linear-to-b from-[#dde7de] from-0% to-[#95B699] to-20% transition-colors duration-500";
+  if (appWrapper && !myProfile) {
+    // Apply the reversed gradient for the login screen
+    appWrapper.className = "min-h-screen flex flex-col bg-linear-to-b from-[#dde7de] from-0% to-[#95B699] to-20% transition-colors duration-500";
+  }
+
+  // Cleanup: Revert ONLY if the event is active
+  return () => {
+    if (appWrapper && currentEvent?.active) {
+      appWrapper.className = "min-h-screen flex flex-col bg-linear-to-b from-[#95B699] from-0% to-[#dde7de] to-20% transition-colors duration-500";
     }
-
-    // Cleanup: Revert to the standard gradient when they log in or leave the page
-    return () => {
-      if (appWrapper) {
-        appWrapper.className = "min-h-screen flex flex-col bg-linear-to-b from-[#95B699] from-0% to-[#dde7de] to-20% transition-colors duration-500";
-      }
-    };
-  }, [myProfile]);
+  };
+}, [myProfile, currentEvent]);
 
   if (loading) {
     return (
@@ -819,12 +819,12 @@ export default function Event() {
             </button>
           </form>
 
-          <button
+          {/* <button
             onClick={() => setViewMode("admin")}
             className="w-full mt-8 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-blue-600 transition-colors"
           >
             <ShieldCheck size={14} /> Admin Access
-          </button>
+          </button> */}
         </div>
       </div>
     );
@@ -833,14 +833,14 @@ export default function Event() {
 // --- PHASE 2: THE LOBBY (WAITING FOR ADMIN) ---
   if (currentEvent && !currentEvent.active) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center text-[#1E3D34] p-10 text-center">
+      <div className="flex-1 flex flex-col items-center justify-center text-white/80 p-10 text-center">
         <div className="animate-bounce mb-8">
           <Clock size={80} strokeWidth={1} />
         </div>
         <h1 className="text-4xl font-black mb-4">
           Hi, {myProfile.firstName} {myProfile.lastName}!
         </h1>
-        <p className="text-xl max-w-md font-medium text-[#1E3D34]/80">
+        <p className="text-xl max-w-md font-medium text-white/80">
           You're all set. Please wait comfortably. The event will begin shortly.
         </p>
         <div className="mt-12 flex items-center gap-2 bg-white/40 px-6 py-3 rounded-full border border-white/50 shadow-sm">

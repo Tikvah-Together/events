@@ -26,10 +26,12 @@ import {
   ChevronDown,
   Pause,
   Bell,
-  AlertCircle
+  AlertCircle,
+  Mail,
+  X,
 } from "lucide-react";
 
-export default function AdminDashboard() {
+export default function AdminDashboard() {// TODO fix isEventOver and buggy writing of notes
   const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [attendees, setAttendees] = useState([]);
@@ -48,6 +50,13 @@ export default function AdminDashboard() {
   const [newGroupName, setNewGroupName] = useState("");
   const [sentEventDetails, setSentEventDetails] = useState([]);
   const [sentReminders, setSentReminders] = useState([]);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailData, setEmailData] = useState({
+    recipients: [], // an array to hold multiple user IDs
+    subject: "",
+    body: "",
+  });
   const INITIAL_FILTERS = {
     search: "",
     hashgafa: "all",
@@ -321,7 +330,7 @@ export default function AdminDashboard() {
     });
   };
 
-const toggleCheckIn = async (attendeeId, currentStatus) => {
+  const toggleCheckIn = async (attendeeId, currentStatus) => {
     try {
       const newStatus = !currentStatus;
       const regRef = doc(db, "registrations", attendeeId);
@@ -346,8 +355,8 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
         getDoc(doc(db, "events", registration.eventId)),
       ]);
 
-      const userData = userSnap.data();
-      const eventData = eventSnap.data();
+      const userData = { ...userSnap.data(), id: userSnap.id };
+      const eventData = { ...eventSnap.data(), id: eventSnap.id };
       const eventGroups = eventData.eventGroups || [];
 
       // The name of the group (e.g., "Group 1")
@@ -423,8 +432,58 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
     }
   };
 
+  // --- SEND EMAIL HANDLER ---
+  const handleSendEmail = async () => {
+    if (!emailData.subject.trim() || !emailData.body.trim()) {
+      alert("Please provide both a subject and a message.");
+      return;
+    }
+
+    setIsSendingEmail(true);
+
+    try {
+      // 1. Map the selected user IDs to their actual email addresses
+      const recipientsEmails = emailData.recipients
+        .map((id) => {
+          const user = masterUsers.find((u) => u.id === id);
+          return user?.email;
+        })
+        .filter(Boolean); // Removes any empty/null emails
+
+      if (recipientsEmails.length === 0) {
+        alert("No valid email addresses found for the selected attendees.");
+        setIsSendingEmail(false);
+        return;
+      }
+
+      // 2. Write to the "mail" collection
+      await addDoc(collection(db, "mail"), {
+        to: recipientsEmails, // Send to the mapped email array
+        message: {
+          subject: emailData.subject,
+          text: emailData.body,
+          html: emailData.body.replace(/\n/g, "<br>"),
+        },
+        eventId: selectedEvent?.id,
+        timestamp: new Date(),
+      });
+
+      setShowEmailModal(false);
+      setEmailData({ recipients: [], subject: "", body: "" }); // Reset to empty array
+      setSelectedUserIds([]);
+      alert(
+        `Email successfully queued for ${recipientsEmails.length} recipient(s)!`,
+      );
+    } catch (error) {
+      console.error("Error queueing email:", error);
+      alert("Failed to queue email. Check console for details.");
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
   const sendAutomatedCheckInEmail = async (userData, eventData) => {
-    const eventURL = `https://events.tikvahtogether.org/event?userId=${userData.userId}&eventId=${eventData.id}`;
+    const eventURL = `https://events.tikvahtogether.org/event?userId=${userData.id}&eventId=${eventData.id}`;
 
     try {
       await addDoc(collection(db, "email"), {
@@ -635,10 +694,10 @@ const toggleCheckIn = async (attendeeId, currentStatus) => {
     }
   };
 
-const deleteUserFromMaster = async (userId, name) => {
+  const deleteUserFromMaster = async (userId, name) => {
     // Fallback if name is passed incorrectly or empty
-    const displayName = name || "this user"; 
-    
+    const displayName = name || "this user";
+
     if (
       window.confirm(
         `Permanently delete ${displayName} from the Master List? This will also remove them from all events and cannot be undone.`,
@@ -651,16 +710,15 @@ const deleteUserFromMaster = async (userId, name) => {
         // 2. Query and delete all registrations associated with this userId
         const regQuery = query(
           collection(db, "registrations"),
-          where("userId", "==", userId)
+          where("userId", "==", userId),
         );
         const regSnap = await getDocs(regQuery);
-        
+
         // Execute all deletion promises concurrently
-        const deletePromises = regSnap.docs.map((docSnap) => 
-          deleteDoc(docSnap.ref)
+        const deletePromises = regSnap.docs.map((docSnap) =>
+          deleteDoc(docSnap.ref),
         );
         await Promise.all(deletePromises);
-
       } catch (err) {
         console.error("Error performing cascading user deletion:", err);
       }
@@ -1091,14 +1149,16 @@ const deleteUserFromMaster = async (userId, name) => {
     const errors = [];
     const groups = {};
 
-    attendees.forEach(a => {
+    attendees.forEach((a) => {
       const t = parseInt(a.tableNumber, 10);
       if (!t || isNaN(t) || t <= 0) return; // Only validate actually assigned tables
 
       const g = a.groupId || "Unassigned";
       if (!groups[g]) groups[g] = { boys: [], girls: [] };
 
-      const isMale = ["man", "boy", "male"].includes((a.gender || "").toLowerCase());
+      const isMale = ["man", "boy", "male"].includes(
+        (a.gender || "").toLowerCase(),
+      );
       if (isMale) groups[g].boys.push(t);
       else groups[g].girls.push(t);
     });
@@ -1108,14 +1168,18 @@ const deleteUserFromMaster = async (userId, name) => {
         if (arr.length === 0) return;
         const sorted = [...arr].sort((a, b) => a - b);
         const unique = new Set(sorted);
-        
+
         if (unique.size !== sorted.length) {
-          errors.push(`Group "${groupId}" (${genderLabel}): Duplicate table numbers detected.`);
+          errors.push(
+            `Group "${groupId}" (${genderLabel}): Duplicate table numbers detected.`,
+          );
         }
-        
+
         const max = Math.max(...sorted);
         if (max !== unique.size) {
-          errors.push(`Group "${groupId}" (${genderLabel}): Gap in table numbers (Expected 1 through ${max}).`);
+          errors.push(
+            `Group "${groupId}" (${genderLabel}): Gap in table numbers (Expected 1 through ${max}).`,
+          );
         }
       };
       checkSequence(data.boys, "Men");
@@ -1141,12 +1205,12 @@ const deleteUserFromMaster = async (userId, name) => {
           Master Singles List
         </button>
         <button
-            onClick={() => window.open('/event?admin=true', '_blank')}
-            className="px-6 py-4 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 transition-colors shadow-sm flex items-center gap-2"
-            title="Open Gatekeeper View"
-          >
-            Table View ↗
-          </button>
+          onClick={() => window.open("/event?admin=true", "_blank")}
+          className="px-6 py-4 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 transition-colors shadow-sm flex items-center gap-2"
+          title="Open Gatekeeper View"
+        >
+          Table View ↗
+        </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -1471,6 +1535,21 @@ const deleteUserFromMaster = async (userId, name) => {
                     </div>
 
                     <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
+                      {/* --- NEW EMAIL BUTTON --- */}
+                      <button
+                        onClick={() => {
+                          // Load the checked users from the main table into the modal
+                          setEmailData((prev) => ({
+                            ...prev,
+                            recipients: [...selectedUserIds],
+                          }));
+                          setShowEmailModal(true);
+                        }}
+                        className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-md font-bold flex items-center gap-2 hover:bg-blue-100 transition-all duration-200 shadow-sm"
+                        title="Send Custom Email"
+                      >
+                        <Mail size={16} /> Email Attendees
+                      </button>
                       {/* Reminder Button */}
                       <button
                         onClick={sendBulkReminders}
@@ -1870,10 +1949,14 @@ const deleteUserFromMaster = async (userId, name) => {
                   <div className="mb-6 bg-red-50 border border-red-200 p-4 rounded-xl shadow-sm">
                     <div className="flex items-center gap-2 mb-2">
                       <AlertCircle className="text-red-600" size={20} />
-                      <h3 className="text-red-800 font-bold text-lg">Table Assignment Errors</h3>
+                      <h3 className="text-red-800 font-bold text-lg">
+                        Table Assignment Errors
+                      </h3>
                     </div>
                     <ul className="list-disc list-inside pl-2 text-red-600 text-sm font-medium space-y-1">
-                      {tableErrors.map((err, i) => <li key={i}>{err}</li>)}
+                      {tableErrors.map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
                     </ul>
                   </div>
                 )}
@@ -1929,739 +2012,812 @@ const deleteUserFromMaster = async (userId, name) => {
                 {/* TABLE SECTION */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm min-w-450">
-                      <thead className="bg-transparent border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
-                        <tr>
-                          {activeTab === "master" && (
-                            <th className="px-6 py-4">
-                              Select all&nbsp;
-                              <input
-                                type="checkbox"
-                                disabled={
-                                  filteredMasterList.length === 0 ||
-                                  !targetEventId
-                                } // Disable if no users visible or no event selected
-                                checked={
-                                  filteredMasterList.length > 0 &&
-                                  filteredMasterList
-                                    .filter(
-                                      (u) =>
-                                        !allRegistrations.some(
-                                          (r) =>
-                                            r.userId === u.id &&
-                                            r.eventId === targetEventId,
-                                        ),
-                                    )
-                                    .every((u) =>
-                                      selectedUserIds.includes(u.id),
-                                    )
-                                }
-                                onChange={(e) => {
-                                  // Only select people who ARE NOT already in the event
-                                  const eligibleIds = filteredMasterList
-                                    .filter(
-                                      (u) =>
-                                        !allRegistrations.some(
-                                          (r) =>
-                                            r.userId === u.id &&
-                                            r.eventId === targetEventId,
-                                        ),
-                                    )
-                                    .map((u) => u.id);
+                    {(() => {
+                      // 1. WE LIFTED THIS FILTER LOGIC UP so the "Select All" header can access it!
+                      const listToDisplay = (
+                        activeTab === "master"
+                          ? filteredMasterList
+                          : filteredAttendees
+                      ).filter((user) => {
+                        if (
+                          activeTab === "events" &&
+                          filters.status !== "all"
+                        ) {
+                          if (user.status !== filters.status) return false;
+                        }
+                        if (!filters.startDate && !filters.endDate) return true;
 
-                                  if (e.target.checked) {
-                                    setSelectedUserIds((prev) => [
-                                      ...new Set([...prev, ...eligibleIds]),
-                                    ]);
-                                  } else {
-                                    setSelectedUserIds((prev) =>
-                                      prev.filter(
-                                        (id) => !eligibleIds.includes(id),
-                                      ),
+                        const signupDate = user.createdAt?.toDate
+                          ? user.createdAt.toDate()
+                          : new Date(user.createdAt);
+                        const start = filters.startDate
+                          ? new Date(filters.startDate)
+                          : null;
+                        const end = filters.endDate
+                          ? new Date(filters.endDate)
+                          : null;
+
+                        if (start && signupDate < start) return false;
+                        if (end) {
+                          const adjustedEnd = new Date(end);
+                          adjustedEnd.setHours(23, 59, 59);
+                          if (signupDate > adjustedEnd) return false;
+                        }
+                        return true;
+                      });
+
+                      return (
+                        <table className="w-full text-left text-sm min-w-450">
+                          <thead className="bg-transparent border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-widest">
+                            <tr>
+                              {/* CHECKBOX HEADER: Now visible on both tabs */}
+                              <th className="px-6 py-4">
+                                Select all&nbsp;
+                                <input
+                                  type="checkbox"
+                                  disabled={
+                                    listToDisplay.length === 0 ||
+                                    (activeTab === "master" && !targetEventId)
+                                  }
+                                  checked={
+                                    listToDisplay.length > 0 &&
+                                    listToDisplay
+                                      .filter((u) => {
+                                        if (activeTab === "master") {
+                                          return !allRegistrations.some(
+                                            (r) =>
+                                              r.userId === u.id &&
+                                              r.eventId === targetEventId,
+                                          );
+                                        }
+                                        return true; // For events tab, everyone is eligible
+                                      })
+                                      .every((u) =>
+                                        selectedUserIds.includes(
+                                          activeTab === "master"
+                                            ? u.id
+                                            : u.userId,
+                                        ),
+                                      )
+                                  }
+                                  onChange={(e) => {
+                                    const eligibleIds = listToDisplay
+                                      .filter((u) => {
+                                        if (activeTab === "master") {
+                                          return !allRegistrations.some(
+                                            (r) =>
+                                              r.userId === u.id &&
+                                              r.eventId === targetEventId,
+                                          );
+                                        }
+                                        return true;
+                                      })
+                                      .map((u) =>
+                                        activeTab === "master"
+                                          ? u.id
+                                          : u.userId,
+                                      );
+
+                                    if (e.target.checked) {
+                                      setSelectedUserIds((prev) => [
+                                        ...new Set([...prev, ...eligibleIds]),
+                                      ]);
+                                    } else {
+                                      setSelectedUserIds((prev) =>
+                                        prev.filter(
+                                          (id) => !eligibleIds.includes(id),
+                                        ),
+                                      );
+                                    }
+                                  }}
+                                />
+                              </th>
+                              <th className="px-6 py-4 sticky left-0 bg-transparent z-20">
+                                Name / Age
+                              </th>
+                              <th className="px-6 py-4">Hashgafa</th>
+                              {activeTab === "master" && (
+                                <th className="px-6 py-4">Signup Date</th>
+                              )}
+                              {activeTab === "master" && (
+                                <th className="px-6 py-4">
+                                  Event Registration
+                                </th>
+                              )}
+                              {activeTab === "master" && (
+                                <th className="px-6 py-4">Event History</th>
+                              )}
+                              {activeTab === "events" && (
+                                <th className="px-6 py-4">
+                                  Confirmation Status
+                                </th>
+                              )}
+                              {activeTab === "events" && (
+                                <th className="px-6 py-4">Check-In</th>
+                              )}
+                              {activeTab === "events" && (
+                                <th className="px-6 py-4">Group Assignment</th>
+                              )}
+                              <th className="px-6 py-4">Gender</th>
+                              {activeTab === "events" && (
+                                <th className="px-6 py-4">Event Label</th>
+                              )}
+                              {activeTab === "events" && (
+                                <th className="px-6 py-4">Table Number</th>
+                              )}
+                              <th className="px-6 py-4">Ethnicity</th>
+                              <th className="px-6 py-4">Other Background</th>
+                              <th className="px-6 py-4">Marital Status</th>
+                              <th className="px-6 py-4">Kohen</th>
+                              <th className="px-6 py-4">Shomer Shabbat</th>
+                              <th className="px-6 py-4">Shomer Kashrut</th>
+                              <th className="px-6 py-4">
+                                Wants covered head (Male)
+                              </th>
+                              <th className="px-6 py-4">
+                                Wants to cover head (Female)
+                              </th>
+                              <th className="px-6 py-4">
+                                Dress Style (Female)
+                              </th>
+                              <th className="px-6 py-4">Anything else</th>
+                              <th className="px-6 py-4 text-right sticky right-0 bg-transparent">
+                                Actions
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {(() => {
+                              // Apply multi-level sorting (Group -> Gender -> Age)
+                              const sortedList = [...listToDisplay].sort(
+                                (a, b) => {
+                                  // 1. Sort by Group ID First
+                                  const groupA = (
+                                    a.groupId || "Unassigned"
+                                  ).toString();
+                                  const groupB = (
+                                    b.groupId || "Unassigned"
+                                  ).toString();
+
+                                  if (groupA !== groupB) {
+                                    return groupA.localeCompare(
+                                      groupB,
+                                      undefined,
+                                      {
+                                        numeric: true,
+                                        sensitivity: "base",
+                                      },
                                     );
                                   }
-                                }}
-                              />
-                            </th>
-                          )}
-                          <th className="px-6 py-4 sticky left-0 bg-transparent z-20">
-                            Name / Age
-                          </th>
-                          <th className="px-6 py-4">Hashgafa</th>
-                          {activeTab === "master" && (
-                            <th className="px-6 py-4">Signup Date</th>
-                          )}
-                          {activeTab === "master" && (
-                            <th className="px-6 py-4">Event Registration</th>
-                          )}
-                          {activeTab === "master" && (
-                            <th className="px-6 py-4">Event History</th>
-                          )}
-                          {activeTab === "events" && (
-                            <th className="px-6 py-4">Confirmation Status</th>
-                          )}
-                          {activeTab === "events" && (
-                            <th className="px-6 py-4">Check-In</th>
-                          )}
-                          {activeTab === "events" && (
-                            <th className="px-6 py-4">Group Assignment</th>
-                          )}
-                          <th className="px-6 py-4">Gender</th>
-                          {activeTab === "events" && (
-                            <th className="px-6 py-4">Event Label</th>
-                          )}
-                          {activeTab === "events" && (
-                            <th className="px-6 py-4">Table Number</th>
-                          )}
-                          <th className="px-6 py-4">Ethnicity</th>
-                          <th className="px-6 py-4">Other Background</th>
-                          <th className="px-6 py-4">Marital Status</th>
-                          <th className="px-6 py-4">Kohen</th>
-                          <th className="px-6 py-4">Shomer Shabbat</th>
-                          <th className="px-6 py-4">Shomer Kashrut</th>
-                          <th className="px-6 py-4">
-                            Wants covered head (Male)
-                          </th>
-                          <th className="px-6 py-4">
-                            Wants to cover head (Female)
-                          </th>
-                          <th className="px-6 py-4">Dress Style (Female)</th>
-                          <th className="px-6 py-4">Anything else</th>
-                          <th className="px-6 py-4 text-right sticky right-0 bg-transparent">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {(() => {
-                          // Determine which list we are actually using
-                          const listToDisplay = (
-                            activeTab === "master"
-                              ? filteredMasterList
-                              : filteredAttendees
-                          ).filter((user) => {
-                            if (
-                              activeTab === "events" &&
-                              filters.status !== "all"
-                            ) {
-                              if (user.status !== filters.status) return false;
-                            }
-                            if (!filters.startDate && !filters.endDate)
-                              return true;
 
-                            // Convert Firestore timestamp to JS Date
-                            const signupDate = user.createdAt?.toDate
-                              ? user.createdAt.toDate()
-                              : new Date(user.createdAt);
-                            const start = filters.startDate
-                              ? new Date(filters.startDate)
-                              : null;
-                            const end = filters.endDate
-                              ? new Date(filters.endDate)
-                              : null;
+                                  // 2. Sort by Gender (Male/Boys first within the group)
+                                  const genderA = (
+                                    a.gender || ""
+                                  ).toLowerCase();
+                                  const genderB = (
+                                    b.gender || ""
+                                  ).toLowerCase();
 
-                            if (start && signupDate < start) return false;
-                            if (end) {
-                              // Set end date to 23:59:59 to include the entire day
-                              const adjustedEnd = new Date(end);
-                              adjustedEnd.setHours(23, 59, 59);
-                              if (signupDate > adjustedEnd) return false;
-                            }
-                          });
+                                  if (genderA !== genderB) {
+                                    const isAMale =
+                                      genderA === "male" ||
+                                      genderA === "man" ||
+                                      genderA === "boy";
+                                    const isBMale =
+                                      genderB === "male" ||
+                                      genderB === "man" ||
+                                      genderB === "boy";
 
-                          // Apply multi-level sorting (Group -> Gender -> Age)
-                          const sortedList = [...listToDisplay].sort((a, b) => {
-                            // 1. Sort by Group ID First
-                            const groupA = (
-                              a.groupId || "Unassigned"
-                            ).toString();
-                            const groupB = (
-                              b.groupId || "Unassigned"
-                            ).toString();
+                                    if (isAMale && !isBMale) return -1;
+                                    if (!isAMale && isBMale) return 1;
+                                  }
 
-                            if (groupA !== groupB) {
-                              return groupA.localeCompare(groupB, undefined, {
-                                numeric: true,
-                                sensitivity: "base",
-                              });
-                            }
+                                  // 3. Sort by Age (Youngest to Oldest within the gender block)
+                                  const ageA = parseInt(a.age) || 999;
+                                  const ageB = parseInt(b.age) || 999;
 
-                            // 2. Sort by Gender (Male/Boys first within the group)
-                            const genderA = (a.gender || "").toLowerCase();
-                            const genderB = (b.gender || "").toLowerCase();
+                                  if (ageA !== ageB) {
+                                    return ageA - ageB;
+                                  }
 
-                            if (genderA !== genderB) {
-                              const isAMale =
-                                genderA === "male" ||
-                                genderA === "man" ||
-                                genderA === "boy";
-                              const isBMale =
-                                genderB === "male" ||
-                                genderB === "man" ||
-                                genderB === "boy";
+                                  // 4. Stable fallback to First Name
+                                  return (a.firstName || "").localeCompare(
+                                    b.firstName || "",
+                                  );
+                                },
+                              );
 
-                              if (isAMale && !isBMale) return -1;
-                              if (!isAMale && isBMale) return 1;
-                            }
+                              return sortedList.map((a, index) => {
+                                const hashgafa = getHashgafaGroup(a);
+                                const isAlreadyInEvent = allRegistrations.some(
+                                  (reg) =>
+                                    reg.userId === a.id &&
+                                    reg.eventId === targetEventId,
+                                );
 
-                            // 3. Sort by Age (Youngest to Oldest within the gender block)
-                            const ageA = parseInt(a.age) || 999;
-                            const ageB = parseInt(b.age) || 999;
+                                let isNewGroup = false;
+                                if (activeTab === "events" && index > 0) {
+                                  isNewGroup =
+                                    a.groupId !== sortedList[index - 1].groupId;
+                                }
 
-                            if (ageA !== ageB) {
-                              return ageA - ageB;
-                            }
-
-                            // 4. Stable fallback to First Name
-                            return (a.firstName || "").localeCompare(
-                              b.firstName || "",
-                            );
-                          });
-
-                          return sortedList.map((a, index) => {
-                            const hashgafa = getHashgafaGroup(a);
-                            const isAlreadyInEvent = allRegistrations.some(
-                              (reg) =>
-                                reg.userId === a.id &&
-                                reg.eventId === targetEventId,
-                            );
-
-                            let isNewGroup = false;
-                            if (activeTab === "events" && index > 0) {
-                              // Compare against the previous item in the SORTED list, not filteredAttendees
-                              isNewGroup =
-                                a.groupId !== sortedList[index - 1].groupId;
-                            }
-
-                            return (
-                              <tr
-                                key={a.id}
-                                className={`border-b transition-colors ${
-                                  isNewGroup && activeTab === "events"
-                                    ? "border-t-4 border-t-slate-300"
-                                    : ""
-                                } ${
-                                  isAlreadyInEvent
-                                    ? "bg-slate-200/70"
-                                    : "hover:bg-[#95B699]/30"
-                                }`}
-                              >
-                                {activeTab === "master" && (
-                                  <td className="px-6 py-4">
-                                    <div className="flex flex-col gap-1">
-                                      <input
-                                        type="checkbox"
-                                        checked={selectedUserIds.includes(a.id)}
-                                        disabled={
-                                          isAlreadyInEvent || !targetEventId
-                                        } // Disable if already in OR no event selected
-                                        className={`${isAlreadyInEvent ? "cursor-not-allowed" : "cursor-pointer"}`}
-                                        onChange={() => {
-                                          setSelectedUserIds((prev) =>
-                                            prev.includes(a.id)
-                                              ? prev.filter((id) => id !== a.id)
-                                              : [...prev, a.id],
-                                          );
-                                        }}
-                                      />
-                                      {isAlreadyInEvent && (
-                                        <span className="text-[9px] font-bold text-slate-400 uppercase leading-tight">
-                                          Added
-                                        </span>
-                                      )}
-                                    </div>
-                                  </td>
-                                )}
-
-                                {/* Permanent Name Column */}
-                                <td
-                                  className={`px-6 py-4 sticky left-0 z-10 border-r border-slate-100 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-[#95B699]/30"}`}
-                                >
-                                  <p className="font-bold text-slate-900">
-                                    {a.firstName} {a.lastName}
-                                  </p>
-                                  <p className="text-xs text-slate-400">
-                                    {a.age}y • {a.gender}
-                                  </p>
-                                </td>
-
-                                {/* Hashgafa Group */}
-                                <td className="px-6 py-4">
-                                  <span
-                                    className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
-                                  >
-                                    {hashgafa.label.toUpperCase()}
-                                  </span>
-                                </td>
-
-                                {/* Signup Date */}
-                                {activeTab === "master" && (
-                                  <td className="px-6 py-4 text-slate-500">
-                                    {a.createdAt?.toDate().toLocaleString() ||
-                                      "-"}
-                                  </td>
-                                )}
-
-                                {/* Event Registration (Events this user has signed up for but not necessarily attended) */}
-                                {activeTab === "master" && (
-                                  <td className="px-6 py-4 text-slate-500 text-xs italic">
-                                    {getUserHistory(a.id).join(", ") || "-"}
-                                  </td>
-                                )}
-
-                                {/* Event History (Events this user has attended) */}
-                                {activeTab === "master" && (
-                                  <td className="px-6 py-4 text-slate-500 text-xs italic">
-                                    {getUserAttendedHistory(a.id).join(", ") ||
-                                      "-"}
-                                  </td>
-                                )}
-
-                                {/* Confirmation Status, possible values are: Pending Invite, Invited, Confirmed, Declined, Waitlist, Attended, and No Response */}
-                                {activeTab === "events" && (
-                                  <td className="px-6 py-4">
-                                    <select
-                                      value={a.status}
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "status",
-                                          e.target.value,
-                                        )
-                                      }
-                                      /* Dynamic classes for the 'box' effect */
-                                      className={`text-xs font-bold px-2 py-1 rounded border transition-all duration-200 ${
-                                        a.status === "confirmed"
-                                          ? "bg-green-100 text-green-900 border-green-300"
-                                          : a.status === "declined"
-                                            ? "bg-red-100 text-red-900 border-red-300"
-                                            : "bg-white text-[#1E3D34] border-gray-300"
-                                      }`}
-                                    >
-                                      <option value="pending invite">
-                                        Pending Invite
-                                      </option>
-                                      <option value="waitlist">Waitlist</option>
-                                      <option value="invited">Invited</option>
-                                      <option value="confirmed">
-                                        Confirmed
-                                      </option>
-                                      <option value="declined">Declined</option>
-                                      <option value="attended">Attended</option>
-                                      <option value="no response">
-                                        No Response
-                                      </option>
-                                    </select>
-                                    {a.status === "pending invite" && (
-                                      <button
-                                        onClick={() => sendInvite(a)}
-                                        className="ml-2 text-xs text-blue-600 hover:underline"
-                                      >
-                                        Invite
-                                      </button>
-                                    )}
-                                    {a.status === "confirmed" && (
-                                      <button
-                                        onClick={() => {
-                                          const alreadySent =
-                                            sentEventDetails.includes(a.userId);
-                                          const msg = alreadySent
-                                            ? `Event details were already sent to ${a.firstName} ${a.lastName}. Send again?`
-                                            : `Send event details to ${a.firstName} ${a.lastName}?`;
-
-                                          if (window.confirm(msg)) {
-                                            sendIndividualReminder(
-                                              a,
-                                              selectedEvent,
-                                            );
-                                          }
-                                        }}
-                                        // No longer disabled so the admin can click to resend
-                                        className={`ml-2 text-xs font-medium transition-colors ${
-                                          sentEventDetails.includes(a.userId)
-                                            ? "text-green-600 hover:text-green-700"
-                                            : "text-blue-600 hover:text-blue-800 hover:underline"
-                                        }`}
-                                      >
-                                        {sentEventDetails.includes(a.userId)
-                                          ? "✓ Event details email sent"
-                                          : "Event Details"}
-                                      </button>
-                                    )}
-
-                                    {/* Repeat similar logic for Final Reminder button */}
-                                    {a.status !== "confirmed" && (
-                                      <button
-                                        onClick={() => {
-                                          const alreadySent =
-                                            sentReminders.includes(a.userId);
-                                          const msg = alreadySent
-                                            ? `Final reminder was already sent to ${a.firstName} ${a.lastName}. Send again?`
-                                            : `Send manual reminder to ${a.firstName} ${a.lastName}?`;
-
-                                          if (window.confirm(msg)) {
-                                            sendFinalReminder(a, selectedEvent);
-                                          }
-                                        }}
-                                        className={`ml-2 text-xs transition-colors ${
-                                          sentReminders.includes(a.userId)
-                                            ? "text-green-600 hover:text-green-700"
-                                            : "text-blue-600 hover:underline"
-                                        }`}
-                                      >
-                                        {sentReminders.includes(a.userId)
-                                          ? "✓ Reminder email sent"
-                                          : "Remind [Final]"}
-                                      </button>
-                                    )}
-                                  </td>
-                                )}
-
-                                {/* Check-In */}
-                                {activeTab === "events" && (
-                                  <td className="px-6 py-4">
-                                    <button
-                                      onClick={() =>
-                                        toggleCheckIn(a.id, a.checkedIn)
-                                      }
-                                      className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
-                                        a.checkedIn
-                                          ? "bg-green-100 text-green-700"
-                                          : "bg-yellow-100 text-yellow-800"
-                                      }`}
-                                    >
-                                      {a.checkedIn ? "CHECKED IN" : "PENDING"}
-                                    </button>
-                                  </td>
-                                )}
-
-                                {/* Group Assignment */}
-                                {activeTab === "events" && (
-                                  <td className="px-6 py-4">
-                                    <select
-                                      /* 1. We look at the groupId stored on this registration */
-                                      value={a.groupId || ""}
-                                      /* 2. We pass only the ID, the field name, and the new value */
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "groupId",
-                                          e.target.value,
-                                        )
-                                      }
-                                      className="text-xs font-bold text-[#1E3D34] bg-white border border-slate-200 rounded p-1 outline-none focus:ring-2 focus:ring-blue-500"
-                                    >
-                                      <option value="">Unassigned</option>
-                                      {(selectedEvent?.eventGroups || []).map(
-                                        (group) => (
-                                          <option
-                                            key={group.name}
-                                            value={group.name}
-                                          >
-                                            {group.name}
-                                          </option>
-                                        ),
-                                      )}
-                                    </select>
-                                  </td>
-                                )}
-
-                                {/* Gender */}
-                                <td className="px-6 py-4">
-                                  <select
-                                    value={a.gender}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "gender",
-                                        e.target.value,
-                                      )
-                                    }
-                                    className={`bg-transparent font-semibold outline-none ${
-                                      a.gender === "woman"
-                                        ? "text-pink-600"
-                                        : "text-blue-600"
+                                return (
+                                  <tr
+                                    key={a.id}
+                                    className={`border-b transition-colors ${
+                                      isNewGroup && activeTab === "events"
+                                        ? "border-t-4 border-t-slate-300"
+                                        : ""
+                                    } ${
+                                      isAlreadyInEvent
+                                        ? "bg-slate-200/70"
+                                        : "hover:bg-[#95B699]/30"
                                     }`}
                                   >
-                                    <option value="man">Man</option>
-                                    <option value="woman">Woman</option>
-                                  </select>
-                                </td>
+                                    {/* ROW CHECKBOX: Now visible on both tabs */}
+                                    <td className="px-6 py-4">
+                                      <div className="flex flex-col gap-1">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedUserIds.includes(
+                                            activeTab === "master"
+                                              ? a.id
+                                              : a.userId,
+                                          )}
+                                          disabled={
+                                            activeTab === "master" &&
+                                            (isAlreadyInEvent || !targetEventId)
+                                          }
+                                          className={`${
+                                            activeTab === "master" &&
+                                            isAlreadyInEvent
+                                              ? "cursor-not-allowed"
+                                              : "cursor-pointer"
+                                          }`}
+                                          onChange={() => {
+                                            const uid =
+                                              activeTab === "master"
+                                                ? a.id
+                                                : a.userId;
+                                            setSelectedUserIds((prev) =>
+                                              prev.includes(uid)
+                                                ? prev.filter(
+                                                    (id) => id !== uid,
+                                                  )
+                                                : [...prev, uid],
+                                            );
+                                          }}
+                                        />
+                                        {activeTab === "master" &&
+                                          isAlreadyInEvent && (
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase leading-tight">
+                                              Added
+                                            </span>
+                                          )}
+                                      </div>
+                                    </td>
 
-                                {/* Event Label */}
-                                {activeTab === "events" && (
-                                  <td className="px-6 py-4 text-[11px]">
-                                    <textarea
-                                      className="bg-transparent border border-slate-100 rounded p-1 w-auto h-auto leading-tight outline-none focus:bg-white"
-                                      value={a.eventLabel || ""}
-                                      onChange={(e) =>
-                                        updateAttendeeField(
-                                          a,
-                                          "eventLabel",
-                                          e.target.value,
-                                        )
-                                      }
-                                    />
-                                  </td>
-                                )}
+                                    {/* Permanent Name Column */}
+                                    <td
+                                      className={`px-6 py-4 sticky left-0 z-10 border-r border-slate-100 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-[#95B699]/30"}`}
+                                    >
+                                      <p className="font-bold text-slate-900">
+                                        {a.firstName} {a.lastName}
+                                      </p>
+                                      <p className="text-xs text-slate-400">
+                                        {a.age}y • {a.gender}
+                                      </p>
+                                    </td>
 
-                                {/* Table Number & Group Name */}
-                                {activeTab === "events" && (
-                                  <td className="px-6 py-4">
-                                    <div className="flex items-center gap-2">
-                                      {/* Input for the Number */}
-                                      Table
-                                      <input
-                                        type="number"
-                                        placeholder="#"
-                                        className="bg-transparent border border-slate-100 rounded p-1 w-12 text-[11px] outline-none focus:bg-white"
-                                        value={(a.tableNumber || 0)}
-                                        onChange={(e) => {
-                                          const groupName = (a.tableNumber || 0);
-                                          const newNum = e.target.value;
+                                    {/* Hashgafa Group */}
+                                    <td className="px-6 py-4">
+                                      <span
+                                        className={`px-3 py-1 rounded-md text-[10px] font-bold border ${hashgafa.color} ${hashgafa.border}`}
+                                      >
+                                        {hashgafa.label.toUpperCase()}
+                                      </span>
+                                    </td>
+
+                                    {/* Signup Date */}
+                                    {activeTab === "master" && (
+                                      <td className="px-6 py-4 text-slate-500">
+                                        {a.createdAt
+                                          ?.toDate()
+                                          .toLocaleString() || "-"}
+                                      </td>
+                                    )}
+
+                                    {/* Event Registration (Events this user has signed up for but not necessarily attended) */}
+                                    {activeTab === "master" && (
+                                      <td className="px-6 py-4 text-slate-500 text-xs italic">
+                                        {getUserHistory(a.id).join(", ") || "-"}
+                                      </td>
+                                    )}
+
+                                    {/* Event History (Events this user has attended) */}
+                                    {activeTab === "master" && (
+                                      <td className="px-6 py-4 text-slate-500 text-xs italic">
+                                        {getUserAttendedHistory(a.id).join(
+                                          ", ",
+                                        ) || "-"}
+                                      </td>
+                                    )}
+
+                                    {/* Confirmation Status */}
+                                    {activeTab === "events" && (
+                                      <td className="px-6 py-4">
+                                        <select
+                                          value={a.status}
+                                          onChange={(e) =>
+                                            updateAttendeeField(
+                                              a,
+                                              "status",
+                                              e.target.value,
+                                            )
+                                          }
+                                          className={`text-xs font-bold px-2 py-1 rounded border transition-all duration-200 ${
+                                            a.status === "confirmed"
+                                              ? "bg-green-100 text-green-900 border-green-300"
+                                              : a.status === "declined"
+                                                ? "bg-red-100 text-red-900 border-red-300"
+                                                : "bg-white text-[#1E3D34] border-gray-300"
+                                          }`}
+                                        >
+                                          <option value="pending invite">
+                                            Pending Invite
+                                          </option>
+                                          <option value="waitlist">
+                                            Waitlist
+                                          </option>
+                                          <option value="invited">
+                                            Invited
+                                          </option>
+                                          <option value="confirmed">
+                                            Confirmed
+                                          </option>
+                                          <option value="declined">
+                                            Declined
+                                          </option>
+                                          <option value="attended">
+                                            Attended
+                                          </option>
+                                          <option value="no response">
+                                            No Response
+                                          </option>
+                                        </select>
+                                        {a.status === "pending invite" && (
+                                          <button
+                                            onClick={() => sendInvite(a)}
+                                            className="ml-2 text-xs text-blue-600 hover:underline"
+                                          >
+                                            Invite
+                                          </button>
+                                        )}
+                                        {a.status === "confirmed" && (
+                                          <button
+                                            onClick={() => {
+                                              const alreadySent =
+                                                sentEventDetails.includes(
+                                                  a.userId,
+                                                );
+                                              const msg = alreadySent
+                                                ? `Event details were already sent to ${a.firstName} ${a.lastName}. Send again?`
+                                                : `Send event details to ${a.firstName} ${a.lastName}?`;
+
+                                              if (window.confirm(msg)) {
+                                                sendIndividualReminder(
+                                                  a,
+                                                  selectedEvent,
+                                                );
+                                              }
+                                            }}
+                                            className={`ml-2 text-xs font-medium transition-colors ${
+                                              sentEventDetails.includes(
+                                                a.userId,
+                                              )
+                                                ? "text-green-600 hover:text-green-700"
+                                                : "text-blue-600 hover:text-blue-800 hover:underline"
+                                            }`}
+                                          >
+                                            {sentEventDetails.includes(a.userId)
+                                              ? "✓ Event details email sent"
+                                              : "Event Details"}
+                                          </button>
+                                        )}
+
+                                        {/* Repeat similar logic for Final Reminder button */}
+                                        {a.status !== "confirmed" && (
+                                          <button
+                                            onClick={() => {
+                                              const alreadySent =
+                                                sentReminders.includes(
+                                                  a.userId,
+                                                );
+                                              const msg = alreadySent
+                                                ? `Final reminder was already sent to ${a.firstName} ${a.lastName}. Send again?`
+                                                : `Send manual reminder to ${a.firstName} ${a.lastName}?`;
+
+                                              if (window.confirm(msg)) {
+                                                sendFinalReminder(
+                                                  a,
+                                                  selectedEvent,
+                                                );
+                                              }
+                                            }}
+                                            className={`ml-2 text-xs transition-colors ${
+                                              sentReminders.includes(a.userId)
+                                                ? "text-green-600 hover:text-green-700"
+                                                : "text-blue-600 hover:underline"
+                                            }`}
+                                          >
+                                            {sentReminders.includes(a.userId)
+                                              ? "✓ Reminder email sent"
+                                              : "Remind [Final]"}
+                                          </button>
+                                        )}
+                                      </td>
+                                    )}
+
+                                    {/* Check-In */}
+                                    {activeTab === "events" && (
+                                      <td className="px-6 py-4">
+                                        <button
+                                          onClick={() =>
+                                            toggleCheckIn(a.id, a.checkedIn)
+                                          }
+                                          className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
+                                            a.checkedIn
+                                              ? "bg-green-100 text-green-700"
+                                              : "bg-yellow-100 text-yellow-800"
+                                          }`}
+                                        >
+                                          {a.checkedIn
+                                            ? "CHECKED IN"
+                                            : "PENDING"}
+                                        </button>
+                                      </td>
+                                    )}
+
+                                    {/* Group Assignment */}
+                                    {activeTab === "events" && (
+                                      <td className="px-6 py-4">
+                                        <select
+                                          value={a.groupId || ""}
+                                          onChange={(e) =>
+                                            updateAttendeeField(
+                                              a,
+                                              "groupId",
+                                              e.target.value,
+                                            )
+                                          }
+                                          className="text-xs font-bold text-[#1E3D34] bg-white border border-slate-200 rounded p-1 outline-none focus:ring-2 focus:ring-blue-500"
+                                        >
+                                          <option value="">Unassigned</option>
+                                          {(
+                                            selectedEvent?.eventGroups || []
+                                          ).map((group) => (
+                                            <option
+                                              key={group.name}
+                                              value={group.name}
+                                            >
+                                              {group.name}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </td>
+                                    )}
+
+                                    {/* Gender */}
+                                    <td className="px-6 py-4">
+                                      <select
+                                        value={a.gender}
+                                        onChange={(e) =>
                                           updateAttendeeField(
                                             a,
-                                            "tableNumber",
-                                            parseInt(newNum) || 0,
-                                          );
-                                        }}
-                                      />
-                                      <span className="text-slate-400 text-[10px]">
-                                        -
-                                      </span>
-                                      {/* Input for the Group Name (e.g., "Group") */}
+                                            "gender",
+                                            e.target.value,
+                                          )
+                                        }
+                                        className={`bg-transparent font-semibold outline-none ${
+                                          a.gender === "woman"
+                                            ? "text-pink-600"
+                                            : "text-blue-600"
+                                        }`}
+                                      >
+                                        <option value="man">Man</option>
+                                        <option value="woman">Woman</option>
+                                      </select>
+                                    </td>
+
+                                    {/* Event Label */}
+                                    {activeTab === "events" && (
+                                      <td className="px-6 py-4 text-[11px]">
+                                        <textarea
+                                          className="bg-transparent border border-slate-100 rounded p-1 w-auto h-auto leading-tight outline-none focus:bg-white"
+                                          value={a.eventLabel || ""}
+                                          onChange={(e) =>
+                                            updateAttendeeField(
+                                              a,
+                                              "eventLabel",
+                                              e.target.value,
+                                            )
+                                          }
+                                        />
+                                      </td>
+                                    )}
+
+                                    {/* Table Number & Group Name */}
+                                    {activeTab === "events" && (
+                                      <td className="px-6 py-4">
+                                        <div className="flex items-center gap-2">
+                                          Table
+                                          <input
+                                            type="number"
+                                            placeholder="#"
+                                            className="bg-transparent border border-slate-100 rounded p-1 w-12 text-[11px] outline-none focus:bg-white"
+                                            value={a.tableNumber || 0}
+                                            onChange={(e) => {
+                                              const newNum = e.target.value;
+                                              updateAttendeeField(
+                                                a,
+                                                "tableNumber",
+                                                parseInt(newNum) || 0,
+                                              );
+                                            }}
+                                          />
+                                          <span className="text-slate-400 text-[10px]">
+                                            -
+                                          </span>
+                                          <input
+                                            type="text"
+                                            placeholder="Group Name"
+                                            className="bg-transparent border border-slate-100 rounded p-1 w-24 text-[11px] outline-none focus:bg-white"
+                                            value={a.groupId || ""}
+                                            onChange={(e) => {
+                                              const newGroupName =
+                                                e.target.value;
+                                              updateAttendeeField(
+                                                a,
+                                                "groupId",
+                                                newGroupName,
+                                              );
+                                            }}
+                                          />
+                                        </div>
+                                      </td>
+                                    )}
+
+                                    {/* Ethnicity Table Cell */}
+                                    <td className="px-6 py-4 text-xs text-slate-600">
                                       <input
                                         type="text"
-                                        placeholder="Group Name"
-                                        className="bg-transparent border border-slate-100 rounded p-1 w-24 text-[11px] outline-none focus:bg-white"
-                                        value={a.groupId || ""}
-                                        onChange={(e) => {
-                                          const tableNum = a.groupId || "";
-                                          const newGroupName = e.target.value;
+                                        className="bg-transparent hover:bg-slate-100 border-none outline-none w-full min-w-25 focus:ring-1 focus:ring-blue-400 rounded p-1 transition-all"
+                                        value={a.ethnicity || ""}
+                                        onChange={(e) =>
                                           updateAttendeeField(
                                             a,
-                                            "groupId",
-                                            newGroupName,
-                                          );
-                                        }}
-                                      />
-                                    </div>
-                                  </td>
-                                )}
-
-                                {/* Ethnicity Table Cell */}
-                                <td className="px-6 py-4 text-xs text-slate-600">
-                                  <input
-                                    type="text"
-                                    className="bg-transparent hover:bg-slate-100 border-none outline-none w-full min-w-25 focus:ring-1 focus:ring-blue-400 rounded p-1 transition-all"
-                                    value={a.ethnicity || ""}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "ethnicity",
-                                        e.target.value,
-                                      )
-                                    }
-                                  />
-                                </td>
-
-                                {/* Other background */}
-                                <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                                  <textarea
-                                    className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                                    value={a.otherSpecify}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "otherSpecify",
-                                        e.target.value,
-                                      )
-                                    }
-                                  />
-                                </td>
-
-                                {/* Marital Status */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.maritalStatus}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "maritalStatus",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="Single">Single</option>
-                                    <option value="Divorced">Divorced</option>
-                                    <option value="Widowed">Widowed</option>
-                                  </select>
-                                </td>
-
-                                {/* Kohen */}
-                                <td className="px-6 py-4 text-slate-500 text-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      a.isKohen === "yes" || a.isKohen === true
-                                    }
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "isKohen",
-                                        e.target.checked ? "yes" : "no",
-                                      )
-                                    }
-                                  />
-                                </td>
-
-                                {/* Shomer Shabbat */}
-                                <td className="px-6 py-4 text-slate-500 text-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      a.isShomerShabbat === "yes" ||
-                                      a.isShomerShabbat === true
-                                    }
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "isShomerShabbat",
-                                        e.target.checked ? "yes" : "no",
-                                      )
-                                    }
-                                  />
-                                </td>
-
-                                {/* Shomer Kashrut */}
-                                <td className="px-6 py-4 text-slate-500 text-center">
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      a.isShomerKashrut === "yes" ||
-                                      a.isShomerKashrut === true
-                                    }
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "isShomerKashrut",
-                                        e.target.checked ? "yes" : "no",
-                                      )
-                                    }
-                                  />
-                                </td>
-
-                                {/* Wants Girl to cover her hair */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.wantsCoveredHead}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "wantsCoveredHead",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="N/A">Not applicable</option>
-                                    <option value="yes">Yes</option>
-                                    <option value="no">No</option>
-                                    <option value="noPreference">
-                                      No preference
-                                    </option>
-                                  </select>
-                                </td>
-
-                                {/* Girl to cover her hair */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.hairCovering}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "hairCovering",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="N/A">Not applicable</option>
-                                    <option value="willCoverHair">
-                                      Will cover hair
-                                    </option>
-                                    <option value="openFlexible">
-                                      Open / Flexible
-                                    </option>
-                                    <option value="notPlanning">
-                                      Not planning to cover hair
-                                    </option>
-                                  </select>
-                                </td>
-
-                                {/* Dress Style */}
-                                <td className="px-6 py-4 text-slate-500">
-                                  <select
-                                    className="bg-transparent outline-none"
-                                    value={a.dressStyle}
-                                    onChange={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "dressStyle",
-                                        e.target.value,
-                                      )
-                                    }
-                                  >
-                                    <option value="N/A">Not applicable</option>
-                                    <option value="skirtsOnly">
-                                      Skirts only
-                                    </option>
-                                    <option value="skirtsPants">
-                                      Skirts + pants
-                                    </option>
-                                  </select>
-                                </td>
-
-                                {/* Anything Else */}
-                                <td className="px-6 py-4 text-slate-400 italic text-[11px]">
-                                  <textarea
-                                    className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                                    defaultValue={a.anythingElse}
-                                    onBlur={(e) =>
-                                      updateAttendeeField(
-                                        a,
-                                        "anythingElse",
-                                        e.target.value.map((s) => s.trim()),
-                                      )
-                                    }
-                                  />
-                                </td>
-
-                                {/* Actions */}
-                                <td
-                                  className={`px-6 py-4 text-right sticky right-0 ${isAlreadyInEvent ? "bg-slate-200/70" : "hover:bg-[#95B699]/30"}`}
-                                >
-                                  <button
-                                    onClick={() =>
-                                      activeTab === "master"
-                                        ? deleteUserFromMaster(a.id, a.firstName + " " + a.lastName)
-                                        : deleteAttendee(
-                                            a.id,
-                                            a.firstName + " " + a.lastName,
+                                            "ethnicity",
+                                            e.target.value,
                                           )
-                                    }
-                                    className="p-2 text-slate-300 hover:text-red-500 transition-all"
-                                  >
-                                    <UserMinus size={18} />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          });
-                        })()}
-                      </tbody>
-                    </table>
+                                        }
+                                      />
+                                    </td>
+
+                                    {/* Other background */}
+                                    <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                                      <textarea
+                                        className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                                        value={a.otherSpecify}
+                                        onChange={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "otherSpecify",
+                                            e.target.value,
+                                          )
+                                        }
+                                      />
+                                    </td>
+
+                                    {/* Marital Status */}
+                                    <td className="px-6 py-4 text-slate-500">
+                                      <select
+                                        className="bg-transparent outline-none"
+                                        value={a.maritalStatus}
+                                        onChange={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "maritalStatus",
+                                            e.target.value,
+                                          )
+                                        }
+                                      >
+                                        <option value="Single">Single</option>
+                                        <option value="Divorced">
+                                          Divorced
+                                        </option>
+                                        <option value="Widowed">Widowed</option>
+                                      </select>
+                                    </td>
+
+                                    {/* Kohen */}
+                                    <td className="px-6 py-4 text-slate-500 text-center">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          a.isKohen === "yes" ||
+                                          a.isKohen === true
+                                        }
+                                        onChange={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "isKohen",
+                                            e.target.checked ? "yes" : "no",
+                                          )
+                                        }
+                                      />
+                                    </td>
+
+                                    {/* Shomer Shabbat */}
+                                    <td className="px-6 py-4 text-slate-500 text-center">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          a.isShomerShabbat === "yes" ||
+                                          a.isShomerShabbat === true
+                                        }
+                                        onChange={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "isShomerShabbat",
+                                            e.target.checked ? "yes" : "no",
+                                          )
+                                        }
+                                      />
+                                    </td>
+
+                                    {/* Shomer Kashrut */}
+                                    <td className="px-6 py-4 text-slate-500 text-center">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          a.isShomerKashrut === "yes" ||
+                                          a.isShomerKashrut === true
+                                        }
+                                        onChange={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "isShomerKashrut",
+                                            e.target.checked ? "yes" : "no",
+                                          )
+                                        }
+                                      />
+                                    </td>
+
+                                    {/* Wants Girl to cover her hair */}
+                                    <td className="px-6 py-4 text-slate-500">
+                                      <select
+                                        className="bg-transparent outline-none"
+                                        value={a.wantsCoveredHead}
+                                        onChange={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "wantsCoveredHead",
+                                            e.target.value,
+                                          )
+                                        }
+                                      >
+                                        <option value="N/A">
+                                          Not applicable
+                                        </option>
+                                        <option value="yes">Yes</option>
+                                        <option value="no">No</option>
+                                        <option value="noPreference">
+                                          No preference
+                                        </option>
+                                      </select>
+                                    </td>
+
+                                    {/* Girl to cover her hair */}
+                                    <td className="px-6 py-4 text-slate-500">
+                                      <select
+                                        className="bg-transparent outline-none"
+                                        value={a.hairCovering}
+                                        onChange={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "hairCovering",
+                                            e.target.value,
+                                          )
+                                        }
+                                      >
+                                        <option value="N/A">
+                                          Not applicable
+                                        </option>
+                                        <option value="willCoverHair">
+                                          Will cover hair
+                                        </option>
+                                        <option value="openFlexible">
+                                          Open / Flexible
+                                        </option>
+                                        <option value="notPlanning">
+                                          Not planning to cover hair
+                                        </option>
+                                      </select>
+                                    </td>
+
+                                    {/* Dress Style */}
+                                    <td className="px-6 py-4 text-slate-500">
+                                      <select
+                                        className="bg-transparent outline-none"
+                                        value={a.dressStyle}
+                                        onChange={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "dressStyle",
+                                            e.target.value,
+                                          )
+                                        }
+                                      >
+                                        <option value="N/A">
+                                          Not applicable
+                                        </option>
+                                        <option value="skirtsOnly">
+                                          Skirts only
+                                        </option>
+                                        <option value="skirtsPants">
+                                          Skirts + pants
+                                        </option>
+                                      </select>
+                                    </td>
+
+                                    {/* Anything Else */}
+                                    <td className="px-6 py-4 text-slate-400 italic text-[11px]">
+                                      <textarea
+                                        className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
+                                        defaultValue={a.anythingElse}
+                                        onBlur={(e) =>
+                                          updateAttendeeField(
+                                            a,
+                                            "anythingElse",
+                                            e.target.value.map((s) => s.trim()),
+                                          )
+                                        }
+                                      />
+                                    </td>
+
+                                    {/* Actions */}
+                                    <td
+                                      className={`px-6 py-4 text-right sticky right-0 ${
+                                        isAlreadyInEvent
+                                          ? "bg-slate-200/70"
+                                          : "hover:bg-[#95B699]/30"
+                                      }`}
+                                    >
+                                      <button
+                                        onClick={() =>
+                                          activeTab === "master"
+                                            ? deleteUserFromMaster(
+                                                a.id,
+                                                a.firstName + " " + a.lastName,
+                                              )
+                                            : deleteAttendee(
+                                                a.id,
+                                                a.firstName + " " + a.lastName,
+                                              )
+                                        }
+                                        className="p-2 text-slate-300 hover:text-red-500 transition-all"
+                                      >
+                                        <UserMinus size={18} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      );
+                    })()}
                   </div>
                   {attendees.length === 0 && (
                     <div className="p-20 text-center text-slate-400 italic">
@@ -2686,6 +2842,191 @@ const deleteUserFromMaster = async (userId, name) => {
           </div>
         </div>
       </div>
+
+      {/* --- EMAIL MODAL UI --- */}
+      {showEmailModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="bg-slate-50 border-b border-slate-200 p-6 flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                  <Mail className="text-blue-600" /> Send Custom Email
+                </h2>
+                <p className="text-xs text-slate-500 mt-1 font-medium">
+                  {selectedEvent?.name}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowEmailModal(false)}
+                className="text-slate-400 hover:text-slate-700 transition-colors bg-white p-2 rounded-full border border-slate-200 shadow-sm"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <div className="p-6 space-y-5">
+              {/* --- NEW SCROLLING CHECKBOX LIST --- */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block">
+                  Select Recipients
+                </label>
+
+                {(() => {
+                  // Get all users associated with this event's registrations
+                  const availableRecipients = attendees
+                    .map((reg) => masterUsers.find((u) => u.id === reg.userId))
+                    .filter(Boolean); // Remove nulls
+
+                  const allSelected =
+                    availableRecipients.length > 0 &&
+                    emailData.recipients.length === availableRecipients.length;
+
+                  const handleToggleAll = () => {
+                    if (allSelected) {
+                      setEmailData({ ...emailData, recipients: [] }); // Deselect all
+                    } else {
+                      setEmailData({
+                        ...emailData,
+                        recipients: availableRecipients.map((u) => u.id),
+                      }); // Select all
+                    }
+                  };
+
+                  const handleToggleRecipient = (userId) => {
+                    if (emailData.recipients.includes(userId)) {
+                      setEmailData({
+                        ...emailData,
+                        recipients: emailData.recipients.filter(
+                          (id) => id !== userId,
+                        ),
+                      });
+                    } else {
+                      setEmailData({
+                        ...emailData,
+                        recipients: [...emailData.recipients, userId],
+                      });
+                    }
+                  };
+
+                  return (
+                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+                      {/* Select All Bar */}
+                      <div className="bg-slate-50 border-b border-slate-200 p-3 px-4 flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={handleToggleAll}
+                          className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                        />
+                        <span className="text-sm font-bold text-slate-700">
+                          Select All ({availableRecipients.length} people)
+                        </span>
+                      </div>
+
+                      {/* Scrollable List */}
+                      <div className="max-h-48 overflow-y-auto p-2 space-y-1">
+                        {availableRecipients.map((user) => {
+                          const isChecked = emailData.recipients.includes(
+                            user.id,
+                          );
+                          const registration = attendees.find(
+                            (r) => r.userId === user.id,
+                          );
+
+                          return (
+                            <label
+                              key={user.id}
+                              className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
+                                isChecked ? "bg-blue-50" : "hover:bg-slate-50"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleRecipient(user.id)}
+                                className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                                  {user.firstName} {user.lastName}
+                                  {registration?.checkedIn ? (
+                                    <span className="px-1.5 py-0.5 rounded-sm bg-green-100 text-green-700 text-[9px] uppercase tracking-wider font-bold">
+                                      Checked In
+                                    </span>
+                                  ) : (
+                                    <span className="px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-500 text-[9px] uppercase tracking-wider font-bold">
+                                      Not Checked In
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-xs text-slate-500">
+                                  {user.email || "No email provided"}
+                                </span>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block">
+                  Subject
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Important update about tonight's event!"
+                  value={emailData.subject}
+                  onChange={(e) =>
+                    setEmailData({ ...emailData, subject: e.target.value })
+                  }
+                  className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 block">
+                  Message
+                </label>
+                <textarea
+                  rows={6}
+                  placeholder="Type your message here..."
+                  value={emailData.body}
+                  onChange={(e) =>
+                    setEmailData({ ...emailData, body: e.target.value })
+                  }
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="bg-slate-50 border-t border-slate-200 p-6 flex justify-end gap-3">
+              <button
+                onClick={() => setShowEmailModal(false)}
+                className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition-colors"
+                disabled={isSendingEmail}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendEmail}
+                disabled={isSendingEmail || emailData.recipients.length === 0}
+                className="px-8 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSendingEmail
+                  ? "Queueing..."
+                  : `Send to ${emailData.recipients.length}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
