@@ -31,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 
-export default function AdminDashboard() {// TODO fix isEventOver and buggy writing of notes
+export default function AdminDashboard() {
   const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [attendees, setAttendees] = useState([]);

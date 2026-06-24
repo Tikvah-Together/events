@@ -103,7 +103,6 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     setHasStarted(true);
   };
 
-  // Add this inside your LiveRoundView component
   useEffect(() => {
     const handleFullscreenChange = () => {
       // Check if any element is currently in fullscreen
@@ -158,16 +157,17 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     );
 
   // --- 1. PARSE USER TABLE & GROUP ---
-  const userInfoForThisEvent = attendees.find((a) => a.userId === user.id);
+  // Safely find the user, or fall back to the 'user' object if they aren't in the checked-in array
+  const userInfoForThisEvent = attendees.find((a) => a.userId === (user.userId || user.id)) || user;
   console.log(userInfoForThisEvent);
-  const groupName = userInfoForThisEvent.groupId || "Group 1";
-  const startTableNum = userInfoForThisEvent.tableNumber || 0;
+  const groupName = userInfoForThisEvent?.groupId || "Group Not Found";
+  const startTableNum = userInfoForThisEvent?.tableNumber || 0;
   console.log("User's starting table number:", startTableNum);
 
   // --- 2. DYNAMIC GROUP MATH ---
   // Filter attendees to ONLY those in this user's group (e.g., "YP")
   const groupAttendees = attendees.filter((a) => {
-    const aGroup = a.groupId || "Group 1";
+    const aGroup = a.groupId || "Group Not Found";
     return aGroup.toLowerCase() === groupName.toLowerCase();
   });
 
@@ -181,37 +181,36 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       ? uniqueTablesInGroup.length
       : event.totalTables || 10; // Fallback to event setting if group detection fails
 
-  // --- 3. MATH & STOP LOGIC ---
-  // --- 3. MATH & STOP LOGIC ---
+// --- 3. MATH & STOP LOGIC ---
   const startTime = event.startTime.toDate();
   const effectiveNow = event.isPaused ? event.pausedAt.toDate() : now;
   const secondsSinceStart = Math.floor((effectiveNow - startTime) / 1000);
 
-  // 1. Separate the buffers
-  const startBuffer = 60; // 1 minute for the initial start
-  const moveBuffer = 120; // 2 minutes for moving between tables (1 + 1)
-
+  const startBuffer = 60; 
+  const moveBuffer = 120; 
   const roundTimeSeconds = (event.roundTime || 7) * 60;
-
-  // 2. Update the logic to use the specific buffer for the cycle
   const roundLengthPlusMove = roundTimeSeconds + moveBuffer;
 
   const isEventStarting = secondsSinceStart < startBuffer;
   const secondsAfterStart = secondsSinceStart - startBuffer;
 
-  // Determine current round
-  const currentRound = isEventStarting
+  // Calculate the raw round, then CAP IT at the max number of tables
+  const rawRound = isEventStarting
     ? 1
     : Math.floor(secondsAfterStart / roundLengthPlusMove) + 1;
+    
+  const currentRound = Math.min(rawRound, totalTablesInGroup);
 
-  // 3. Update the transition and time calculations
   const timeInCurrentBlock = isEventStarting
     ? 0
     : secondsAfterStart % roundLengthPlusMove;
 
   const isLastRound = currentRound === totalTablesInGroup;
+  
+  // We determine if it's over if the raw mathematical round exceeds our max tables,
+  // OR if we are in the last round and the dating time has expired.
   const isEventOver =
-    currentRound > totalTablesInGroup ||
+    rawRound > totalTablesInGroup ||
     (isLastRound && timeInCurrentBlock >= roundTimeSeconds);
 
   const isMoving =
@@ -253,6 +252,9 @@ export default function LiveRoundView({ event, user, attendees, users }) {
   // reset decision state when state changes
   useEffect(() => {
     setDecisionMade(false);
+    setPendingSelection(null);
+    setOptionalNotes("");
+    setIsPriority(false);
   }, [currentRound]);
 
   // --- 5. PARTNER MATCHING ---
@@ -310,12 +312,11 @@ export default function LiveRoundView({ event, user, attendees, users }) {
   };
 
   const saveInformationAndContinue = async () => {
-    // if (tableAnswer !== String(tableToShow)) {
-    //   alert("Please enter the correct table number.");
-    //   return;
-    // }
     if (pendingSelection === "no") {
       setDecisionMade(true);
+      setPendingSelection(null);
+      setOptionalNotes("");
+      setIsPriority(false);
       return;
     }
 
@@ -456,7 +457,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
               </p>
             </div>
           ) : (
-            <FeedbackForm />
+            renderFeedbackForm()
           )}
         </div>
       );
@@ -515,7 +516,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
               </p>
             </>
           ) : (
-            <FeedbackForm />
+            renderFeedbackForm()
           )}
         </div>
       );
@@ -573,7 +574,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     );
   };
 
-  const FeedbackForm = () => (
+  const renderFeedbackForm = () => (
     <div className="w-full max-w-xl text-center">
       <h1 className="text-5xl font-black mb-12 text-white">
         How was {partner?.firstName + " " + partner?.lastName}?

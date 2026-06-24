@@ -82,7 +82,7 @@ export default function Event() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Fetch Attendees for the auto-selected event
+// 2. Fetch Attendees for the auto-selected event
   useEffect(() => {
     if (!selectedEventId) return;
     const q = query(
@@ -92,16 +92,29 @@ export default function Event() {
     const unsubscribe = onSnapshot(q, (snap) => {
       const docs = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((u) => u.checkedIn); // make sure to only pull checked-in attendees
+        .filter((u) => u.checkedIn); 
       setAttendees(docs);
 
+      // Safely merge the fresh data without losing our IDs
       if (myProfile) {
-        const updatedMe = masterUsers.find((u) => u.id === myProfile.userId);
-        setMyProfile(updatedMe);
+        // Find the user ID whether it's stored under userId or id
+        const targetUserId = myProfile.userId || myProfile.id;
+        
+        const freshUser = masterUsers.find((u) => u.id === targetUserId);
+        const freshReg = docs.find((r) => r.userId === targetUserId);
+
+        if (freshUser) {
+          setMyProfile((prev) => ({
+            ...prev,
+            ...freshUser,
+            ...(freshReg || {}), // Merge registration data back in if it exists
+            userId: targetUserId // Guarantee userId is never lost
+          }));
+        }
       }
     });
     return () => unsubscribe();
-  }, [selectedEventId, myProfile?.id, masterUsers]);
+  }, [selectedEventId, myProfile?.id, myProfile?.userId, masterUsers]);
 
   // 3. Login Logic
   const handleVerifyIdentity = async (e) => {
