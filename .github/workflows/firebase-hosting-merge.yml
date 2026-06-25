@@ -12,9 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: npm ci && npm run build
-      - uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # TODO update to v0 later
+      - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TTEVENTS_81927 }}
-          channelId: live
           projectId: ttevents-81927
