@@ -775,6 +775,29 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
+  const handleBulkGroupAssign = async (newGroupId) => {
+    if (selectedUserIds.length === 0) return;
+    
+    const displayGroupName = newGroupId === "" ? "Unassigned" : newGroupId;
+    if (!window.confirm(`Move ${selectedUserIds.length} selected attendee(s) to "${displayGroupName}"?`)) return;
+
+    try {
+      // Find the registrations for the selected users
+      const promises = attendees
+        .filter((a) => selectedUserIds.includes(a.userId))
+        .map((a) => {
+          // Update the registration doc using a.id
+          return updateDoc(doc(db, "registrations", a.id), { groupId: newGroupId });
+        });
+
+      await Promise.all(promises);
+      setSelectedUserIds([]); // Clear selections after successful assignment
+    } catch (err) {
+      console.error("Error bulk updating groups:", err);
+      alert("Failed to assign groups. Check console for details.");
+    }
+  };
+
   useEffect(() => {
     const hasMaleAge = filters.minAgeMan || filters.maxAgeMan;
     const hasFemaleAge = filters.minAgeWoman || filters.maxAgeWoman;
@@ -1405,6 +1428,12 @@ export default function AdminDashboard() {
                           ? selectedEvent.scheduledAt.toDate().toLocaleString()
                           : "Not scheduled"}
                       </p>
+                      <p className="text-slate-400 text-sm mt-2 font-mono">
+                        General Location: {selectedEvent.generalLocation || "N/A"}
+                      </p>
+                      <p className="text-slate-400 text-sm mt-2 font-mono">
+                        Full Address: {selectedEvent.fullAddress || "N/A"}
+                      </p>
                     </div>
 
                     <div className="flex flex-col gap-4 bg-slate-100 p-5 rounded-xl border border-slate-200 mb-8">
@@ -1535,7 +1564,7 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
-                      {/* --- NEW EMAIL BUTTON --- */}
+                      {/* --- EMAIL BUTTON --- */}
                       <button
                         onClick={() => {
                           // Load the checked users from the main table into the modal
@@ -1943,6 +1972,51 @@ export default function AdminDashboard() {
                     </div>
                   )}
                 </div>
+
+                {/* BULK ACTIONS BAR (Events Tab) */}
+                {activeTab === "events" && selectedUserIds.length > 0 && (
+                  <div className="bg-[#1E3D34] text-white p-4 rounded-xl mb-4 flex flex-wrap items-center justify-between shadow-md animate-in fade-in slide-in-from-bottom-2">
+                    <span className="font-bold text-sm">
+                      {selectedUserIds.length} attendee(s) selected
+                    </span>
+                    <div className="flex gap-3 items-center">
+                      {/* Added bg-white explicitly, along with a subtle border and hover transitions */}
+                      <select
+                        className="bg-white text-slate-900 text-sm p-2 rounded-lg border border-slate-200 outline-none font-semibold min-w-50 cursor-pointer shadow-sm hover:bg-slate-50 transition-colors"
+                        defaultValue="DEFAULT"
+                        onChange={(e) => {
+                          if (e.target.value !== "DEFAULT") {
+                            const val = e.target.value === "UNASSIGNED" ? "" : e.target.value;
+                            handleBulkGroupAssign(val);
+                            e.target.value = "DEFAULT"; // Reset dropdown
+                          }
+                        }}
+                      >
+                        {/* We explicitly style the default/placeholder option to look like a placeholder */}
+                        <option value="DEFAULT" disabled className="text-slate-400 font-normal">
+                          Move to Group...
+                        </option>
+                        
+                        {(selectedEvent?.eventGroups || []).map((group) => (
+                          <option key={group.name} value={group.name} className="text-slate-900 font-medium">
+                            {group.name}
+                          </option>
+                        ))}
+                        
+                        <option value="UNASSIGNED" className="text-red-600 font-medium">
+                          Unassigned
+                        </option>
+                      </select>
+                      
+                      <button
+                        onClick={() => setSelectedUserIds([])}
+                        className="text-white/80 hover:text-white text-sm font-semibold px-2 transition-colors underline decoration-dotted underline-offset-4"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* TABLE ERRORS WARNING */}
                 {tableErrors.length > 0 && (
