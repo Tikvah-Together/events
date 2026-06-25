@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: npm ci && npm run build
-      - uses: FirebaseExtended/action-hosting-deploy@v11
+      - uses: FirebaseExtended/action-hosting-deploy@500ac62 # TODO update to v0 later
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TTEVENTS_81927 }}
