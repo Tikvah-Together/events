@@ -11,10 +11,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: npm ci && npm run build
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+
+      # 1. Explicitly set up Node 24 for your entire runner environment
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TTEVENTS_81927 }}
-          channelId: live
-          projectId: ttevents-81927
+          node-version: 24
+          cache: 'npm'
+
+      # 2. Run your standard project build steps
+      - name: Install Dependencies & Build
+        run: |
+          npm ci
+          npm run build
+
+      # 3. Log into Google Cloud using your existing Service Account Secret
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TTEVENTS_81927 }}'
+
+      # 4. Deploy directly using the native Firebase CLI (Runs flawlessly on Node 24)
+      - name: Deploy to Firebase Hosting
+        run: |
+          npx firebase-tools deploy --only hosting --project ttevents-81927
