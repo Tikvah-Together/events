@@ -327,6 +327,8 @@ export default function AdminDashboard() {
       active: true,
       startTime: new Date(), // This is the "Big Bang" for the timer
       totalTables: women.length,
+      isCompleted: false,
+      endDate: null,
     });
   };
 
@@ -777,9 +779,14 @@ export default function AdminDashboard() {
 
   const handleBulkGroupAssign = async (newGroupId) => {
     if (selectedUserIds.length === 0) return;
-    
+
     const displayGroupName = newGroupId === "" ? "Unassigned" : newGroupId;
-    if (!window.confirm(`Move ${selectedUserIds.length} selected attendee(s) to "${displayGroupName}"?`)) return;
+    if (
+      !window.confirm(
+        `Move ${selectedUserIds.length} selected attendee(s) to "${displayGroupName}"?`,
+      )
+    )
+      return;
 
     try {
       // Find the registrations for the selected users
@@ -787,7 +794,9 @@ export default function AdminDashboard() {
         .filter((a) => selectedUserIds.includes(a.userId))
         .map((a) => {
           // Update the registration doc using a.id
-          return updateDoc(doc(db, "registrations", a.id), { groupId: newGroupId });
+          return updateDoc(doc(db, "registrations", a.id), {
+            groupId: newGroupId,
+          });
         });
 
       await Promise.all(promises);
@@ -1072,6 +1081,8 @@ export default function AdminDashboard() {
         scheduledAt: scheduledDateTime, // This is what we use for the 72h check
         generalLocation: generalLocation,
         fullAddress: fullAddress,
+        isCompleted: false,
+        endDate: null,
       });
 
       setEventName("");
@@ -1082,6 +1093,7 @@ export default function AdminDashboard() {
     }
     setLoading(false);
   };
+
   const updateAttendeeField = async (attendee, field, newValue) => {
     try {
       const registrationFields = [
@@ -1126,6 +1138,40 @@ export default function AdminDashboard() {
     }
   };
 
+  const completeEvent = async (currentEvent) => {
+    if (!currentEvent || !currentEvent.id) return;
+
+    if (
+      window.confirm(
+        `Are you sure you want to mark "${currentEvent.name}" as completed?`,
+      )
+    ) {
+      try {
+        const eventRef = doc(db, "events", currentEvent.id);
+        const now = new Date();
+
+        await updateDoc(eventRef, {
+          active: false, // Ensure the event stops running
+          isCompleted: true,
+          endDate: now,
+        });
+
+        // Optimistically update the selected event in the UI
+        setSelectedEvent((prev) => ({
+          ...prev,
+          active: false,
+          isCompleted: true,
+          endDate: now,
+        }));
+
+        alert("Event successfully marked as completed.");
+      } catch (err) {
+        console.error("Error completing event:", err);
+        alert("Failed to complete event.");
+      }
+    }
+  };
+
   const stats = useMemo(() => {
     const getListStats = (list) => {
       // Simplified since data is always man/woman
@@ -1138,9 +1184,9 @@ export default function AdminDashboard() {
       const ratio =
         total > 0
           ? {
-              b: Math.round((boys / total) * 100),
-              g: Math.round((girls / total) * 100),
-            }
+            b: Math.round((boys / total) * 100),
+            g: Math.round((girls / total) * 100),
+          }
           : { b: 0, g: 0 };
 
       return { boys, girls, total, ratio };
@@ -1241,9 +1287,8 @@ export default function AdminDashboard() {
           {/* SIDEBAR: Event List */}
           {activeTab === "events" && (
             <div
-              className={`${
-                selectedEvent ? "hidden md:flex" : "flex"
-              } w-full md:w-auto max-w-xs bg-white border-r border-slate-200 p-6 flex-col h-full`}
+              className={`${selectedEvent ? "hidden md:flex" : "flex"
+                } w-full md:w-auto max-w-xs bg-white border-r border-slate-200 p-6 flex-col h-full`}
             >
               <h2 className="text-xl font-bold text-[#1E3D34] mb-6">
                 Events Management
@@ -1326,11 +1371,10 @@ export default function AdminDashboard() {
                   <div
                     key={ev.id}
                     onClick={() => setSelectedEvent(ev)}
-                    className={`p-3 rounded-lg cursor-pointer transition-all border ${
-                      selectedEvent?.id === ev.id
+                    className={`p-3 rounded-lg cursor-pointer transition-all border ${selectedEvent?.id === ev.id
                         ? "bg-[#95B699]/30 border-blue-200"
                         : "bg-white border-transparent hover:bg-transparent"
-                    }`}
+                      }`}
                   >
                     <div className="flex justify-between items-start">
                       <span className="font-semibold text-slate-800 text-sm truncate">
@@ -1368,11 +1412,10 @@ export default function AdminDashboard() {
                           {selectedEvent.name}
                         </h1>
                         <span
-                          className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase transition-colors duration-300 ${
-                            selectedEvent.active
+                          className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase transition-colors duration-300 ${selectedEvent.active
                               ? "bg-green-500 text-white animate-pulse"
                               : "bg-slate-200 text-slate-600"
-                          }`}
+                            }`}
                         >
                           {selectedEvent.active ? "LIVE" : "DRAFT"}
                         </span>
@@ -1429,7 +1472,8 @@ export default function AdminDashboard() {
                           : "Not scheduled"}
                       </p>
                       <p className="text-slate-400 text-sm mt-2 font-mono">
-                        General Location: {selectedEvent.generalLocation || "N/A"}
+                        General Location:{" "}
+                        {selectedEvent.generalLocation || "N/A"}
                       </p>
                       <p className="text-slate-400 text-sm mt-2 font-mono">
                         Full Address: {selectedEvent.fullAddress || "N/A"}
@@ -1502,10 +1546,10 @@ export default function AdminDashboard() {
                           events.find((e) => e.id === selectedEvent?.id)
                             ?.eventGroups || []
                         ).length === 0 && (
-                          <span className="text-xs italic text-slate-400">
-                            No groups created yet.
-                          </span>
-                        )}
+                            <span className="text-xs italic text-slate-400">
+                              No groups created yet.
+                            </span>
+                          )}
 
                         {(
                           events.find((e) => e.id === selectedEvent?.id)
@@ -1563,82 +1607,111 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 w-full md:w-auto border-t md:border-none pt-4 md:pt-0">
-                      {/* --- EMAIL BUTTON --- */}
-                      <button
-                        onClick={() => {
-                          // Load the checked users from the main table into the modal
-                          setEmailData((prev) => ({
-                            ...prev,
-                            recipients: [...selectedUserIds],
-                          }));
-                          setShowEmailModal(true);
-                        }}
-                        className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-md font-bold flex items-center gap-2 hover:bg-blue-100 transition-all duration-200 shadow-sm"
-                        title="Send Custom Email"
-                      >
-                        <Mail size={16} /> Email Attendees
-                      </button>
-                      {/* Reminder Button */}
-                      <button
-                        onClick={sendBulkReminders}
-                        className="px-4 py-2 bg-white text-[#1E3D34] border border-[#1E3D34] rounded-md font-bold flex items-center gap-2 hover:bg-[#95B699]/30 transition-all duration-200 shadow-sm"
-                        title="Send Reminders"
-                      >
-                        <Bell size={16} /> Remind All
-                      </button>
-                      <button
-                        onClick={() =>
-                          toggleStatus(selectedEvent.id, selectedEvent.active)
-                        }
-                        className={`px-6 py-2 rounded-md font-bold flex items-center gap-2 transition-all duration-200 shadow-sm border ${
-                          selectedEvent.active
-                            ? "bg-white text-orange-600 border-orange-200 hover:bg-orange-50"
-                            : "bg-[#1E3D34] text-white border-[#1E3D34] hover:bg-[#95B699]"
-                        }`}
-                      >
-                        {selectedEvent.active ? (
-                          <>
-                            <Square size={16} fill="currentColor" /> Stop Event
-                          </>
-                        ) : (
-                          <>
-                            <Play size={16} fill="currentColor" /> Launch Event
-                          </>
-                        )}
-                      </button>
-                      <button
-                        onClick={() =>
-                          togglePause(selectedEvent, selectedEvent.isPaused)
-                        }
-                        className={`px-6 py-2 rounded-md font-bold flex items-center gap-2 transition-all duration-200 shadow-sm border
-                         ${
-                           selectedEvent.isPaused
-                             ? "bg-green-600 text-white border-green-600 hover:bg-green-700"
-                             : "bg-slate-200 text-slate-600 border-slate-200 hover:bg-slate-300"
-                         }`}
-                        disabled={!selectedEvent.active}
-                      >
-                        {selectedEvent.isPaused ? (
-                          <>
-                            {" "}
-                            <Play size={16} fill="currentColor" /> Resume{" "}
-                          </>
-                        ) : (
-                          <>
-                            {" "}
-                            <Pause size={16} fill="currentColor" /> Pause{" "}
-                          </>
-                        )}
-                      </button>
+                    {/* Event Action Buttons Container */}
+                    <div className="flex flex-wrap items-center gap-4 w-full border-t md:border-none pt-4 md:pt-0">
+                      {/* Group 1: Communication Actions */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Email Attendees Button */}
+                        <button
+                          onClick={() => {
+                            // Load the checked users from the main table into the modal
+                            setEmailData((prev) => ({
+                              ...prev,
+                              recipients: [...selectedUserIds],
+                            }));
+                            setShowEmailModal(true);
+                          }}
+                          className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-md font-bold flex items-center gap-2 hover:bg-blue-100 transition-all duration-200 shadow-sm"
+                          title="Send Custom Email"
+                        >
+                          <Mail size={16} /> Email Attendees
+                        </button>
+                        {/* Send Bulk Reminders Button */}
+                        <button
+                          onClick={sendBulkReminders}
+                          className="px-4 py-2 bg-white text-[#1E3D34] border border-[#1E3D34] rounded-md font-bold flex items-center gap-2 hover:bg-[#95B699]/30 transition-all duration-200 shadow-sm"
+                          title="Send Reminders"
+                        >
+                          <Bell size={16} /> Remind All
+                        </button>
+                      </div>
 
-                      <button
-                        onClick={() => deleteEvent(selectedEvent.id)}
-                        className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-md transition"
-                        title="Delete Event"
-                      >
-                        <Trash2 size={22} />
-                      </button>
+                      {/* Group 2: Event State Actions */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Launch Event Button */}
+                        <button
+                          onClick={() =>
+                            toggleStatus(selectedEvent.id, selectedEvent.active)
+                          }
+                          className={`px-6 py-2 rounded-md font-bold flex items-center gap-2 transition-all duration-200 shadow-sm border ${selectedEvent.active
+                              ? "bg-white text-orange-600 border-orange-200 hover:bg-orange-50"
+                              : "bg-[#1E3D34] text-white border-[#1E3D34] hover:bg-[#95B699]"
+                            }`}
+                        >
+                          {selectedEvent.active ? (
+                            <>
+                              <Square size={16} fill="currentColor" /> Stop
+                              Event
+                            </>
+                          ) : (
+                            <>
+                              <Play size={16} fill="currentColor" /> Launch
+                              Event
+                            </>
+                          )}
+                        </button>
+
+                        {/* Pause / Resume Button */}
+                        <button
+                          onClick={() =>
+                            togglePause(selectedEvent, selectedEvent.isPaused)
+                          }
+                          className={`px-6 py-2 rounded-md font-bold flex items-center gap-2 transition-all duration-200 shadow-sm border
+                          ${selectedEvent.isPaused
+                              ? "bg-green-600 text-white border-green-600 hover:bg-green-700"
+                              : "bg-slate-200 text-slate-600 border-slate-200 hover:bg-slate-300"
+                            }`}
+                          disabled={
+                            !selectedEvent.active || selectedEvent.isCompleted
+                          }
+                        >
+                          {selectedEvent.isPaused ? (
+                            <>
+                              {" "}
+                              <Play size={16} fill="currentColor" /> Resume{" "}
+                            </>
+                          ) : (
+                            <>
+                              {" "}
+                              <Pause size={16} fill="currentColor" /> Pause{" "}
+                            </>
+                          )}
+                        </button>
+
+                        {/* Complete Event Button */}
+                        {!selectedEvent.isCompleted ? (
+                          <button
+                            onClick={() => completeEvent(selectedEvent)}
+                            className="px-6 py-2 bg-purple-600 text-white border border-purple-600 rounded-md font-bold flex items-center gap-2 hover:bg-purple-700 transition-all duration-200 shadow-sm"
+                            title="Mark Event as Completed"
+                          >
+                            Complete Event
+                          </button>
+                        ) : (
+                          <span className="px-4 py-2 bg-slate-100 text-slate-500 rounded-md font-bold text-sm border border-slate-200 cursor-not-allowed">
+                            Completed
+                          </span>
+                        )}
+
+                        {/* Delete Button */}
+                        <button
+                          onClick={() => deleteEvent(selectedEvent.id)}
+                          className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-md transition"
+                          title="Delete Event"
+                        >
+                          <Trash2 size={22} /> Delete Event
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1986,28 +2059,42 @@ export default function AdminDashboard() {
                         defaultValue="DEFAULT"
                         onChange={(e) => {
                           if (e.target.value !== "DEFAULT") {
-                            const val = e.target.value === "UNASSIGNED" ? "" : e.target.value;
+                            const val =
+                              e.target.value === "UNASSIGNED"
+                                ? ""
+                                : e.target.value;
                             handleBulkGroupAssign(val);
                             e.target.value = "DEFAULT"; // Reset dropdown
                           }
                         }}
                       >
                         {/* We explicitly style the default/placeholder option to look like a placeholder */}
-                        <option value="DEFAULT" disabled className="text-slate-400 font-normal">
+                        <option
+                          value="DEFAULT"
+                          disabled
+                          className="text-slate-400 font-normal"
+                        >
                           Move to Group...
                         </option>
-                        
+
                         {(selectedEvent?.eventGroups || []).map((group) => (
-                          <option key={group.name} value={group.name} className="text-slate-900 font-medium">
+                          <option
+                            key={group.name}
+                            value={group.name}
+                            className="text-slate-900 font-medium"
+                          >
                             {group.name}
                           </option>
                         ))}
-                        
-                        <option value="UNASSIGNED" className="text-red-600 font-medium">
+
+                        <option
+                          value="UNASSIGNED"
+                          className="text-red-600 font-medium"
+                        >
                           Unassigned
                         </option>
                       </select>
-                      
+
                       <button
                         onClick={() => setSelectedUserIds([])}
                         className="text-white/80 hover:text-white text-sm font-semibold px-2 transition-colors underline decoration-dotted underline-offset-4"
@@ -2318,15 +2405,13 @@ export default function AdminDashboard() {
                                 return (
                                   <tr
                                     key={a.id}
-                                    className={`border-b transition-colors ${
-                                      isNewGroup && activeTab === "events"
+                                    className={`border-b transition-colors ${isNewGroup && activeTab === "events"
                                         ? "border-t-4 border-t-slate-300"
                                         : ""
-                                    } ${
-                                      isAlreadyInEvent
+                                      } ${isAlreadyInEvent
                                         ? "bg-slate-200/70"
                                         : "hover:bg-[#95B699]/30"
-                                    }`}
+                                      }`}
                                   >
                                     {/* ROW CHECKBOX: Now visible on both tabs */}
                                     <td className="px-6 py-4">
@@ -2342,12 +2427,11 @@ export default function AdminDashboard() {
                                             activeTab === "master" &&
                                             (isAlreadyInEvent || !targetEventId)
                                           }
-                                          className={`${
-                                            activeTab === "master" &&
-                                            isAlreadyInEvent
+                                          className={`${activeTab === "master" &&
+                                              isAlreadyInEvent
                                               ? "cursor-not-allowed"
                                               : "cursor-pointer"
-                                          }`}
+                                            }`}
                                           onChange={() => {
                                             const uid =
                                               activeTab === "master"
@@ -2356,8 +2440,8 @@ export default function AdminDashboard() {
                                             setSelectedUserIds((prev) =>
                                               prev.includes(uid)
                                                 ? prev.filter(
-                                                    (id) => id !== uid,
-                                                  )
+                                                  (id) => id !== uid,
+                                                )
                                                 : [...prev, uid],
                                             );
                                           }}
@@ -2429,13 +2513,12 @@ export default function AdminDashboard() {
                                               e.target.value,
                                             )
                                           }
-                                          className={`text-xs font-bold px-2 py-1 rounded border transition-all duration-200 ${
-                                            a.status === "confirmed"
+                                          className={`text-xs font-bold px-2 py-1 rounded border transition-all duration-200 ${a.status === "confirmed"
                                               ? "bg-green-100 text-green-900 border-green-300"
                                               : a.status === "declined"
                                                 ? "bg-red-100 text-red-900 border-red-300"
                                                 : "bg-white text-[#1E3D34] border-gray-300"
-                                          }`}
+                                            }`}
                                         >
                                           <option value="pending invite">
                                             Pending Invite
@@ -2485,13 +2568,12 @@ export default function AdminDashboard() {
                                                 );
                                               }
                                             }}
-                                            className={`ml-2 text-xs font-medium transition-colors ${
-                                              sentEventDetails.includes(
-                                                a.userId,
-                                              )
+                                            className={`ml-2 text-xs font-medium transition-colors ${sentEventDetails.includes(
+                                              a.userId,
+                                            )
                                                 ? "text-green-600 hover:text-green-700"
                                                 : "text-blue-600 hover:text-blue-800 hover:underline"
-                                            }`}
+                                              }`}
                                           >
                                             {sentEventDetails.includes(a.userId)
                                               ? "✓ Event details email sent"
@@ -2518,11 +2600,10 @@ export default function AdminDashboard() {
                                                 );
                                               }
                                             }}
-                                            className={`ml-2 text-xs transition-colors ${
-                                              sentReminders.includes(a.userId)
+                                            className={`ml-2 text-xs transition-colors ${sentReminders.includes(a.userId)
                                                 ? "text-green-600 hover:text-green-700"
                                                 : "text-blue-600 hover:underline"
-                                            }`}
+                                              }`}
                                           >
                                             {sentReminders.includes(a.userId)
                                               ? "✓ Reminder email sent"
@@ -2539,11 +2620,10 @@ export default function AdminDashboard() {
                                           onClick={() =>
                                             toggleCheckIn(a.id, a.checkedIn)
                                           }
-                                          className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${
-                                            a.checkedIn
+                                          className={`flex items-center gap-2 px-3 py-1 rounded-full font-black text-[10px] ${a.checkedIn
                                               ? "bg-green-100 text-green-700"
                                               : "bg-yellow-100 text-yellow-800"
-                                          }`}
+                                            }`}
                                         >
                                           {a.checkedIn
                                             ? "CHECKED IN"
@@ -2592,11 +2672,10 @@ export default function AdminDashboard() {
                                             e.target.value,
                                           )
                                         }
-                                        className={`bg-transparent font-semibold outline-none ${
-                                          a.gender === "woman"
+                                        className={`bg-transparent font-semibold outline-none ${a.gender === "woman"
                                             ? "text-pink-600"
                                             : "text-blue-600"
-                                        }`}
+                                          }`}
                                       >
                                         <option value="man">Man</option>
                                         <option value="woman">Woman</option>
@@ -2861,23 +2940,22 @@ export default function AdminDashboard() {
 
                                     {/* Actions */}
                                     <td
-                                      className={`px-6 py-4 text-right sticky right-0 ${
-                                        isAlreadyInEvent
+                                      className={`px-6 py-4 text-right sticky right-0 ${isAlreadyInEvent
                                           ? "bg-slate-200/70"
                                           : "hover:bg-[#95B699]/30"
-                                      }`}
+                                        }`}
                                     >
                                       <button
                                         onClick={() =>
                                           activeTab === "master"
                                             ? deleteUserFromMaster(
-                                                a.id,
-                                                a.firstName + " " + a.lastName,
-                                              )
+                                              a.id,
+                                              a.firstName + " " + a.lastName,
+                                            )
                                             : deleteAttendee(
-                                                a.id,
-                                                a.firstName + " " + a.lastName,
-                                              )
+                                              a.id,
+                                              a.firstName + " " + a.lastName,
+                                            )
                                         }
                                         className="p-2 text-slate-300 hover:text-red-500 transition-all"
                                       >
@@ -3012,9 +3090,8 @@ export default function AdminDashboard() {
                           return (
                             <label
                               key={user.id}
-                              className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
-                                isChecked ? "bg-blue-50" : "hover:bg-slate-50"
-                              }`}
+                              className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${isChecked ? "bg-blue-50" : "hover:bg-slate-50"
+                                }`}
                             >
                               <input
                                 type="checkbox"
