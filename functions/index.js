@@ -1,153 +1,443 @@
 /* eslint-env node */
-/**
- * Import function triggers from their respective submodules:
- *
- * const {onCall} = require("firebase-functions/v2/https");
- * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
-
-// const {setGlobalOptions} = require("firebase-functions");
-// const {onRequest} = require("firebase-functions/https");
-// const logger = require("firebase-functions/logger");
-
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
-// setGlobalOptions({ maxInstances: 10 });
-
-// Create and deploy your first functions
-// https://firebase.google.com/docs/functions/get-started
-
-// exports.helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
-
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { GoogleGenAI } = require("@google/genai");
+const { defineSecret } = require('firebase-functions/params');
 const admin = require("firebase-admin");
+
+// Define Cloud Secrets (Evaluated safely at runtime)
+const geminiApiKey = defineSecret('GEMINI_API_KEY');
+const whatsappPhoneId = defineSecret('WHATSAPP_PHONE_NUMBER_ID');
+const whatsappAccessToken = defineSecret('WHATSAPP_ACCESS_TOKEN');
+const whatsappVerifyToken = defineSecret('WHATSAPP_VERIFY_TOKEN');
 
 // Initialize Firebase Admin if it hasn't been initialized yet
 if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 
-exports.generateMatches = onCall(async (request) => {
-  // 1. Guard check for the eventId
-  const eventId = request.data.eventId;
-  if (!eventId) {
-    throw new HttpsError("invalid-argument", "The function must be called with a valid 'eventId'.");
+const db = admin.firestore();
+const GEMINI_MODEL = "gemini-3.1-flash-lite";
+
+/**
+ * HELPER: Lazily instantiates the Gemini AI client at runtime using injected secrets
+ */
+function getAiClient() {
+  return new GoogleGenAI({ apiKey: geminiApiKey.value() });
+}
+
+// Automatically complete events and run AI Shadchan process for threshold passed events.
+exports.autoCompleteEventsAndRunAI = onSchedule({
+  schedule: "every 1 hours",
+  timeoutSeconds: 540,
+  secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken]
+}, async (event) => {
+  const now = admin.firestore.Timestamp.now();
+  const eventsRef = db.collection("events");
+
+  const snapshot = await eventsRef.where("isCompleted", "==", false).where("aiProcessed", "==", false).get();
+
+  if (snapshot.empty) {
+    console.log("No pending events to process.");
+    return;
   }
 
-  const db = admin.firestore();
+  const batch = db.batch();
+  const eventsToProcess = [];
 
-  try {
-    // 2. Fetch all user documents to extract their feedback arrays
-    const usersSnapshot = await db.collection("users").get();
-    const participants = {};
+  snapshot.forEach((doc) => {
+    const eventData = doc.data();
 
-    // Filter and build a map of users who actually gave feedback for this event
-    usersSnapshot.forEach((doc) => {
-      const userData = doc.data();
-      const feedbackArray = userData.feedbackData || [];
+    if (!eventData.scheduledAt) return;
 
-      // Check if this specific event exists in their array
-      const hasEventFeedback = feedbackArray.some(f => f.event === eventId);
+    const scheduledTimeMs = eventData.scheduledAt.toDate().getTime();
+    const eighteenHoursMs = 18 * 60 * 60 * 1000;
+    const targetCompletionTime = scheduledTimeMs + eighteenHoursMs;
 
-      if (hasEventFeedback) {
-        participants[doc.id] = {
-          id: doc.id,
-          name: userData.firstName + " " + userData.lastName || "No name found",
-          phoneNumber: userData.phoneNumber || "",
-          feedback: feedbackArray
-        };
-      }
-    });
+    if (Date.now() >= targetCompletionTime) {
+      console.log(`Auto-completing event: ${doc.id}`);
 
-    const uniqueMatches = {};
-
-    // 3. Find Mutual Matches
-    Object.keys(participants).forEach((userAId) => {
-      const userA = participants[userAId];
-
-      userA.feedback.forEach((feedbackA) => {
-        // Look for entries matching this event where User A selected "yes"
-        if (feedbackA.event === eventId && feedbackA.interested === "yes") {
-          const userBId = feedbackA.partnerId;
-
-          // Check if User B exists and also left feedback
-          if (participants[userBId]) {
-            const userB = participants[userBId];
-
-            // Look for User B saying "yes" back to User A for this same event
-            const mutualFeedback = userB.feedback.find(
-              (feedbackB) => feedbackB.event === eventId && feedbackB.partnerId === userAId && feedbackB.interested === "yes"
-            );
-
-            if (mutualFeedback) {
-              // Create an alphabetical composite key (e.g. "User123_User999") to avoid duplicate processing
-              const matchId = userAId < userBId ? `${userAId}_${userBId}` : `${userBId}_${userAId}`;
-
-              const isUser1A = userAId < userBId;
-              const user1 = isUser1A ? userA : userB;
-              const user2 = isUser1A ? userB : userA;
-              const user1Feedback = isUser1A ? feedbackA : mutualFeedback;
-              const user2Feedback = isUser1A ? mutualFeedback : feedbackA;
-
-              // Save the structural data, mapping priority statuses
-              uniqueMatches[matchId] = {
-                eventId: eventId,
-                user1Id: user1.id,
-                user2Id: user2.id,
-                user1Name: user1.name,
-                user2Name: user2.name,
-                user1Priority: user1Feedback.isPriority || false,
-                user2Priority: user2Feedback.isPriority || false,
-              };
-            }
-          }
-        }
+      batch.update(doc.ref, {
+        active: false,
+        isCompleted: true,
+        endDate: now,
+        aiProcessed: true 
       });
-    });
 
-    // 4. Save the matches into the activeMatches collection using a Batch write
-    const batch = db.batch();
-    let matchCount = 0;
-
-    for (const matchId in uniqueMatches) {
-      const matchData = uniqueMatches[matchId];
-      const matchRef = db.collection("activeMatches").doc(matchId);
-
-      // Only write if the match doesn't already exist from a previous calculation
-      const matchDoc = await matchRef.get();
-      if (!matchDoc.exists) {
-        batch.set(matchRef, {
-          ...matchData,
-          status: "awaiting_initial_reply", // Starts at step 1 of your workflow
-          user1State: "pending",
-          user2State: "pending",
-          lastContactedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-        matchCount++;
-      }
+      eventsToProcess.push(doc.id);
     }
+  });
 
-    if (matchCount > 0) {
-      await batch.commit();
-    }
+  if (eventsToProcess.length > 0) {
+    await batch.commit();
 
-    return { success: true, matchesGenerated: matchCount };
+    const aiPromises = eventsToProcess.map(eventId => runAiShadchanFunctions(eventId));
+    await Promise.all(aiPromises);
 
-  } catch (error) {
-    console.error("Error generating matches: ", error);
-    throw new HttpsError("internal", "Failed to calculate mutual matches.");
+    console.log(`Successfully completed and ran AI for ${eventsToProcess.length} event(s).`);
   }
 });
+
+// Listens for manual completion of events in the AdminDashboard.
+exports.manualEventCompletionTrigger = onDocumentUpdated({
+  document: "events/{eventId}",
+  timeoutSeconds: 540,
+  secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken]
+}, async (event) => {
+  const beforeData = event.data.before.data();
+  const afterData = event.data.after.data();
+
+  if (beforeData.isCompleted !== true && afterData.isCompleted === true && afterData.aiProcessed !== true) {
+    console.log(`Manual override detected for Event: ${event.params.eventId}. Starting AI immediately.`);
+    
+    await event.data.after.ref.update({ aiProcessed: true });
+    await runAiShadchanFunctions(event.params.eventId);
+  }
+});
+
+/**
+ * ------------------------------------------------------------------
+ * CONVERSATIONAL AI SHADCHAN IMPLEMENTATION
+ * ------------------------------------------------------------------
+ */
+
+async function runAiShadchanFunctions(eventId) {
+  console.log(`Initializing individual AI Shadchan threads for Event: ${eventId}`);
+
+  try {
+    const usersSnapshot = await db.collection("users").get();
+    const allUsersMap = {};
+    usersSnapshot.forEach(doc => { allUsersMap[doc.id] = { id: doc.id, ...doc.data() }; });
+
+    // 1. Create an array of Promises mapping over each user
+    const userProcessingPromises = Object.keys(allUsersMap).map(async (userId) => {
+      try {
+        const user = allUsersMap[userId];
+        const feedbackArray = user.feedbackData || [];
+
+        const priorityYes = [];
+        const standardYes = [];
+        const maybes = [];
+
+        feedbackArray.forEach(f => {
+          if (f.event !== eventId) return;
+
+          const candidateInfo = {
+            candidateId: f.partnerId,
+            name: `${allUsersMap[f.partnerId]?.firstName || ""} ${allUsersMap[f.partnerId]?.lastName || ""}`.trim() || "An Attendee",
+            notes: allUsersMap[f.partnerId]?.bio || ""
+          };
+
+          if (f.interested === "yes" && f.isPriority) {
+            priorityYes.push(candidateInfo);
+          } else if (f.interested === "yes") {
+            standardYes.push(candidateInfo);
+          } else if (f.interested === "maybe") {
+            maybes.push(candidateInfo);
+          }
+        });
+
+        const pipeline = [...priorityYes, ...standardYes, ...maybes];
+        
+        // Use 'return' instead of 'continue' since we are inside a map callback
+        if (pipeline.length === 0) return; 
+
+        const sessionId = `${eventId}_${userId}`;
+        const sessionRef = db.collection("aiMatchmakerSessions").doc(sessionId);
+
+        const userProfile = {
+          age: user.age || 0,
+          gender: user.gender || "",
+          birthDate: user.birthDate || "",
+          ethnicity: user.ethnicity || [],
+          otherSpecify: user.otherSpecify || "",
+          isKohen: user.isKohen || "no",
+          isShomerShabbat: user.isShomerShabbat || "yes",
+          isShomerKashrut: user.isShomerKashrut || "yes",
+          wantsCoveredHead: user.wantsCoveredHead || "N/A",
+          hairCovering: user.hairCovering || "N/A",
+          dressStyle: user.dressStyle || "N/A",
+          maritalStatus: user.maritalStatus || "",
+          anythingElse: user.anythingElse || ""
+        };
+
+        const sessionData = {
+          eventId: eventId,
+          userId: userId,
+          userName: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+          userPhoneNumber: formatForWhatsApp(user.phoneNumber),
+          userProfile: userProfile, 
+          candidatePipeline: pipeline,
+          currentPipelineIndex: 0,
+          messages: [],
+          status: "active",
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        const openingMessage = await generateAiResponse(sessionData);
+
+        sessionData.messages.push({
+          sender: "ai",
+          text: openingMessage,
+          timestamp: new Date().toISOString()
+        });
+
+        await sessionRef.set(sessionData);
+        await sendWhatsAppMessage(sessionData.userPhoneNumber, openingMessage);
+
+      } catch (userError) {
+        // Catch individual user errors so it doesn't fail the entire Promise.all
+        console.error(`Error processing AI Shadchan for user ${userId}:`, userError);
+      }
+    });
+
+    // 2. Execute all user threads concurrently
+    await Promise.all(userProcessingPromises);
+    
+    console.log(`Successfully completed all AI Shadchan threads for Event: ${eventId}`);
+
+  } catch (error) {
+    console.error("Failed to initialize AI Shadchan threads:", error);
+  }
+}
+
+/**
+ * OFFICIAL WHATSAPP CLOUD API WEBHOOK ENDPOINT
+ */
+exports.handleIncomingWhatsApp = onRequest(
+  { secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, whatsappVerifyToken] },
+  async (req, res) => {
+    // 1. Webhook Verification (Required by Meta when setting up the webhook)
+    const VERIFY_TOKEN = whatsappVerifyToken.value();
+    if (req.method === "GET") {
+      const mode = req.query["hub.mode"];
+      const token = req.query["hub.verify_token"];
+      const challenge = req.query["hub.challenge"];
+
+      if (mode === "subscribe" && token === VERIFY_TOKEN) {
+        res.status(200).send(challenge);
+        return;
+      } else {
+        res.sendStatus(403);
+        return;
+      }
+    }
+
+    // 2. Handle Incoming Messages (POST)
+    if (req.body.object === "whatsapp_business_account") {
+      const entry = req.body.entry?.[0];
+      const changes = entry?.changes?.[0];
+      const value = changes?.value;
+      const messages = value?.messages;
+
+      // Status update receipts require a quick 200 OK
+      if (!messages || !messages[0]) {
+        res.sendStatus(200);
+        return;
+      }
+
+      const message = messages[0];
+      const fromPhoneNumber = message.from; 
+      const incomingText = message.text?.body;
+
+      if (!incomingText) {
+        res.sendStatus(200);
+        return;
+      }      
+
+      try {
+        const sessionSnapshot = await db.collection("aiMatchmakerSessions")
+          .where("userPhoneNumber", "==", fromPhoneNumber)
+          .where("status", "==", "active")
+          .limit(1)
+          .get();
+
+        if (sessionSnapshot.empty) {
+          await sendWhatsAppMessage(fromPhoneNumber, "No active matchmaking session found.");
+          res.sendStatus(200);
+          return;
+        }
+
+        const sessionDoc = sessionSnapshot.docs[0];
+        const sessionData = sessionDoc.data();
+
+        sessionData.messages.push({
+          sender: "user",
+          text: incomingText,
+          timestamp: new Date().toISOString()
+        });
+
+        const aiPayload = await generateAiResponseWithState(sessionData);
+
+        sessionData.messages.push({
+          sender: "ai",
+          text: aiPayload.replyText,
+          timestamp: new Date().toISOString()
+        });
+
+        sessionData.currentPipelineIndex = aiPayload.nextIndex;
+        if (aiPayload.closeSession) sessionData.status = "completed";
+
+        await sessionDoc.ref.set(sessionData);
+        await sendWhatsAppMessage(sessionData.userPhoneNumber, aiPayload.replyText);
+
+        if (aiPayload.matchConfirmed && aiPayload.confirmedCandidateId) {
+          await recordConversationalMatch(sessionData.eventId, sessionData.userId, aiPayload.confirmedCandidateId);
+        }
+        res.sendStatus(200);
+      } catch (err) {
+        console.error("Error processing incoming WhatsApp message:", err);
+        res.sendStatus(400);
+      }
+    } else {
+      res.sendStatus(404);
+    }
+  }
+);
+
+async function generateAiResponse(sessionData) {
+  const currentCandidate = sessionData.candidatePipeline[sessionData.currentPipelineIndex];
+  const ai = getAiClient();
+
+  const systemPrompt = `
+    You are a warm, traditional, yet modern AI matchmaker (Shadchan) messaging your client, ${sessionData.userName}, on WhatsApp.
+    
+    CLIENT PROFILE CONTEXT:
+    ${JSON.stringify(sessionData.userProfile, null, 2)}
+    
+    Current candidate you are introducing to them: ${currentCandidate.name}.
+    Candidate details: ${currentCandidate.notes || "No extra biography info provided."}
+    
+    TASK: Write a highly personal, inviting, short WhatsApp message introduction. 
+    Act like an insightful, empathetic human who genuinely wants to see them happy. Use their profile context naturally if it helps make a connection.
+    End the text by asking if they would be open to exploring things with ${currentCandidate.name}.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: systemPrompt,
+    config: { maxOutputTokens: 400 }
+  });
+
+  return response.text;
+}
+
+async function generateAiResponseWithState(sessionData) {
+  const currentIdx = sessionData.currentPipelineIndex;
+  const pipeline = sessionData.candidatePipeline;
+  const currentCandidate = pipeline[currentIdx];
+  const ai = getAiClient();
+
+  const systemInstruction = `
+    You are an expert, empathetic personal matchmaker (Shadchan) messaging ${sessionData.userName} on WhatsApp. 
+    
+    CLIENT PROFILE CONTEXT:
+    ${JSON.stringify(sessionData.userProfile, null, 2)}
+    
+    CRITICAL PIPELINE DATA:
+    ${JSON.stringify(pipeline)}
+    
+    Current candidate under discussion: Index ${currentIdx} (${currentCandidate ? currentCandidate.name : "None left"}).
+    
+    TASK: Analyze the user's incoming response and determine the next action step.
+    - If they say yes or express excitement, validate their choice warmly and set 'matchConfirmed' to true.
+    - If they reject the option, ask for something else, or show indifference, validate their feelings and increment 'nextIndex' to pitch the next person.
+    - If you reach the end of the pipeline array, politely and gently say you have no more options for this specific event and set 'closeSession' to true.
+    
+    Return strictly JSON matching this schema:
+    {
+      "replyText": "Your natural text response back to the user AS the Shadchan.",
+      "nextIndex": ${currentIdx},
+      "matchConfirmed": false,
+      "confirmedCandidateId": "${currentCandidate ? currentCandidate.candidateId : ""}",
+      "closeSession": false
+    }
+  `;
+
+  const formattedChatLog = sessionData.messages.map(m => ({
+    role: m.sender === "ai" ? "model" : "user",
+    parts: [{ text: m.text }]
+  }));
+
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: formattedChatLog,
+    config: {
+      systemInstruction: systemInstruction,
+      responseMimeType: "application/json",
+      maxOutputTokens: 1000
+    }
+  });
+
+  return JSON.parse(response.text);
+}
+
+/**
+ * OFFICIAL WHATSAPP API: Send Message
+ */
+async function sendWhatsAppMessage(toPhoneNumber, messageText) {
+  const phoneId = whatsappPhoneId.value();
+  const accessToken = whatsappAccessToken.value();
+  
+  console.log(`[WhatsApp API] Sending message to ${toPhoneNumber}...`);
+
+  const url = `https://graph.facebook.com/v23.0/${phoneId}/messages`;
+  
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: toPhoneNumber,
+    type: "text",
+    text: {
+      body: messageText
+    }
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error(`[WhatsApp API Error]`, data);
+    } else {
+      console.log(`[WhatsApp API] Successfully sent. Message ID: ${data.messages[0].id}`);
+    }
+  } catch (error) {
+    console.error(`[WhatsApp API Request Failed]:`, error);
+  }
+}
+
+async function recordConversationalMatch(eventId, userAId, userBId) {
+  const matchId = userAId < userBId ? `${userAId}_${userBId}` : `${userBId}_${userAId}`;
+  await db.collection("activeMatches").doc(matchId).set({
+    eventId: eventId,
+    user1Id: userAId < userBId ? userAId : userBId,
+    user2Id: userAId < userBId ? userBId : userAId,
+    status: "awaiting_initial_reply",
+    user1State: "pending",
+    user2State: "pending",
+    conversationalMatch: true,
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  }, { merge: true });
+}
+
+function formatForWhatsApp(phoneString) {
+  if (!phoneString) return "";
+
+  let cleaned = phoneString.toString().replace(/\D/g, '');
+
+  if (cleaned.length === 10) {
+    return `1${cleaned}`;
+  }
+
+  return cleaned;
+}

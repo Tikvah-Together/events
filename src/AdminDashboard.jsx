@@ -1143,7 +1143,7 @@ export default function AdminDashboard() {
 
     if (
       window.confirm(
-        `Are you sure you want to mark "${currentEvent.name}" as completed?`,
+        `Are you sure you want to mark "${currentEvent.name}" as completed and trigger AI processing?`,
       )
     ) {
       try {
@@ -1152,7 +1152,7 @@ export default function AdminDashboard() {
 
         await updateDoc(eventRef, {
           active: false, // Ensure the event stops running
-          isCompleted: true,
+          isCompleted: true, // Triggers a firebase function to process the results
           endDate: now,
         });
 
@@ -1164,7 +1164,7 @@ export default function AdminDashboard() {
           endDate: now,
         }));
 
-        alert("Event successfully marked as completed.");
+        alert("Event successfully marked as completed, and the AI Shadchan will start processing the results.");
       } catch (err) {
         console.error("Error completing event:", err);
         alert("Failed to complete event.");
@@ -1688,18 +1688,23 @@ export default function AdminDashboard() {
                           )}
                         </button>
 
-                        {/* Complete Event Button */}
+                        {/* Manual AI Shadchan Start Button (automatically starts 18 hours after the event is created) */}
                         {!selectedEvent.isCompleted ? (
+                          <div className="flex items-center gap-2">
                           <button
                             onClick={() => completeEvent(selectedEvent)}
                             className="px-6 py-2 bg-purple-600 text-white border border-purple-600 rounded-md font-bold flex items-center gap-2 hover:bg-purple-700 transition-all duration-200 shadow-sm"
-                            title="Mark Event as Completed"
+                            title="Start AI Shadchan"
                           >
-                            Complete Event
+                            Force Start "AI Shadchan" now
                           </button>
+                          <span className="text-xs text-slate-500">
+                            AI Shadchan will start at {new Date(selectedEvent.scheduledAt.toDate().getTime() + 18 * 60 * 60 * 1000).toLocaleString()}
+                          </span>
+                          </div>
                         ) : (
                           <span className="px-4 py-2 bg-slate-100 text-slate-500 rounded-md font-bold text-sm border border-slate-200 cursor-not-allowed">
-                            Completed
+                            AI Shadchan force-started
                           </span>
                         )}
 
