@@ -123,6 +123,21 @@ async function runAiShadchanFunctions(eventId) {
         feedbackArray.forEach(f => {
           if (f.event !== eventId) return;
 
+          const partner = allUsersMap[f.partnerId];
+          if (!partner) return; // Failsafe if partner deleted their account
+
+          const partnerFeedback = partner.feedbackData || [];
+          
+          // Look for the user's ID inside the partner's feedback array
+          const mutualInterest = partnerFeedback.find(
+            pf => pf.partnerId === userId && 
+                  pf.event === eventId && 
+                  (pf.interested === "yes" || pf.interested === "maybe")
+          );
+
+          // If the partner didn't say yes or maybe, skip this candidate!
+          if (!mutualInterest) return;
+
           const candidateInfo = {
             candidateId: f.partnerId,
             name: `${allUsersMap[f.partnerId]?.firstName || ""} ${allUsersMap[f.partnerId]?.lastName || ""}`.trim() || "An Attendee",
@@ -208,7 +223,7 @@ async function runAiShadchanFunctions(eventId) {
 exports.handleIncomingWhatsApp = onRequest(
   { secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, whatsappVerifyToken] },
   async (req, res) => {
-    // 1. Webhook Verification (Required by Meta when setting up the webhook)
+    // 1. Webhook Verification
     const VERIFY_TOKEN = whatsappVerifyToken.value();
     if (req.method === "GET") {
       const mode = req.query["hub.mode"];
@@ -231,7 +246,6 @@ exports.handleIncomingWhatsApp = onRequest(
       const value = changes?.value;
       const messages = value?.messages;
 
-      // Status update receipts require a quick 200 OK
       if (!messages || !messages[0]) {
         res.sendStatus(200);
         return;
@@ -247,9 +261,10 @@ exports.handleIncomingWhatsApp = onRequest(
       }      
 
       try {
+        // UPDATE: Look for active OR paused sessions
         const sessionSnapshot = await db.collection("aiMatchmakerSessions")
           .where("userPhoneNumber", "==", fromPhoneNumber)
-          .where("status", "==", "active")
+          .where("status", "in", ["active", "paused_waiting_on_partner"])
           .limit(1)
           .get();
 
@@ -262,29 +277,86 @@ exports.handleIncomingWhatsApp = onRequest(
         const sessionDoc = sessionSnapshot.docs[0];
         const sessionData = sessionDoc.data();
 
+        // 1. Log incoming user message
         sessionData.messages.push({
           sender: "user",
           text: incomingText,
           timestamp: new Date().toISOString()
         });
 
+        // 2. Get AI Decision
         const aiPayload = await generateAiResponseWithState(sessionData);
 
+        // 3. Log AI response
         sessionData.messages.push({
           sender: "ai",
           text: aiPayload.replyText,
           timestamp: new Date().toISOString()
         });
 
-        sessionData.currentPipelineIndex = aiPayload.nextIndex;
-        if (aiPayload.closeSession) sessionData.status = "completed";
+        // --- NEW STATE MACHINE ROUTING ---
 
-        await sessionDoc.ref.set(sessionData);
-        await sendWhatsAppMessage(sessionData.userPhoneNumber, aiPayload.replyText);
+        if (aiPayload.action === "ask_partner") {
+          // Pause current user
+          sessionData.status = "paused_waiting_on_partner";
+          await sessionDoc.ref.set(sessionData);
+          await sendWhatsAppMessage(sessionData.userPhoneNumber, aiPayload.replyText);
 
-        if (aiPayload.matchConfirmed && aiPayload.confirmedCandidateId) {
-          await recordConversationalMatch(sessionData.eventId, sessionData.userId, aiPayload.confirmedCandidateId);
+          // Inject question into partner's session
+          const partnerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
+          const partnerSessionRef = db.collection("aiMatchmakerSessions").doc(partnerSessionId);
+          const partnerSessionDoc = await partnerSessionRef.get();
+
+          if (partnerSessionDoc.exists) {
+            const pData = partnerSessionDoc.data();
+            const questionText = `[Shadchan Question from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". (ID: ${sessionData.userId}) - How should I respond?`;
+            
+            pData.messages.push({
+              sender: "system",
+              text: questionText,
+              timestamp: new Date().toISOString()
+            });
+            await partnerSessionRef.set(pData);
+            await sendWhatsAppMessage(pData.userPhoneNumber, questionText);
+          }
+        } 
+        else if (aiPayload.action === "answer_partner") {
+          // Send answer back to original asker
+          const askerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
+          const askerSessionRef = db.collection("aiMatchmakerSessions").doc(askerSessionId);
+          const askerSessionDoc = await askerSessionRef.get();
+
+          if (askerSessionDoc.exists) {
+            const aData = askerSessionDoc.data();
+            const answerText = `[Shadchan Answer from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". Would you like to match with them?`;
+            
+            aData.status = "active"; // Unpause original asker
+            aData.messages.push({
+              sender: "system",
+              text: answerText,
+              timestamp: new Date().toISOString()
+            });
+            await askerSessionRef.set(aData);
+            await sendWhatsAppMessage(aData.userPhoneNumber, answerText);
+          }
+
+          // Continue current user's session normally
+          await sessionDoc.ref.set(sessionData);
+          await sendWhatsAppMessage(sessionData.userPhoneNumber, aiPayload.replyText);
+        } 
+        else {
+          // Normal continuation
+          sessionData.currentPipelineIndex = aiPayload.nextIndex;
+          if (aiPayload.closeSession) sessionData.status = "completed";
+
+          await sessionDoc.ref.set(sessionData);
+          await sendWhatsAppMessage(sessionData.userPhoneNumber, aiPayload.replyText);
+
+          if (aiPayload.matchConfirmed && aiPayload.confirmedCandidateId) {
+            await recordConversationalMatch(sessionData.eventId, sessionData.userId, aiPayload.confirmedCandidateId);
+          }
         }
+
         res.sendStatus(200);
       } catch (err) {
         console.error("Error processing incoming WhatsApp message:", err);
@@ -301,7 +373,7 @@ async function generateAiResponse(sessionData) {
   const ai = getAiClient();
 
   const systemPrompt = `
-    You are a warm, traditional, yet modern AI matchmaker (Shadchan) messaging your client, ${sessionData.userName}, on WhatsApp.
+    You are a warm, traditional, yet modern AI matchmaker (Shadchan) messaging your client, ${sessionData.userName}, on WhatsApp on behalf of SY SmartMatch.
     
     CLIENT PROFILE CONTEXT:
     ${JSON.stringify(sessionData.userProfile, null, 2)}
@@ -329,8 +401,8 @@ async function generateAiResponseWithState(sessionData) {
   const currentCandidate = pipeline[currentIdx];
   const ai = getAiClient();
 
-  const systemInstruction = `
-    You are an expert, empathetic personal matchmaker (Shadchan) messaging ${sessionData.userName} on WhatsApp. 
+const systemInstruction = `
+    You are an expert, empathetic personal matchmaker (Shadchan) messaging ${sessionData.userName} on WhatsApp on behalf of SY SmartMatch.
     
     CLIENT PROFILE CONTEXT:
     ${JSON.stringify(sessionData.userProfile, null, 2)}
@@ -340,27 +412,42 @@ async function generateAiResponseWithState(sessionData) {
     
     Current candidate under discussion: Index ${currentIdx} (${currentCandidate ? currentCandidate.name : "None left"}).
     
-    TASK: Analyze the user's incoming response and determine the next action step.
-    - If they say yes or express excitement, validate their choice warmly and set 'matchConfirmed' to true.
-    - If they reject the option, ask for something else, or show indifference, validate their feelings and increment 'nextIndex' to pitch the next person.
-    - If you reach the end of the pipeline array, politely and gently say you have no more options for this specific event and set 'closeSession' to true.
+    GO-BETWEEN RULES:
+    If the user has a specific question for the candidate before deciding (e.g., "Does he mind if I work late?"), you must PAUSE and ask the candidate. 
+    - Set 'action' to "ask_partner".
+    - Set 'crossSessionPartnerId' to the candidate's ID (${currentCandidate ? currentCandidate.candidateId : ""}).
+    - Set 'crossSessionMessage' to the exact question you want to ask them.
+    
+    If the user is REPLYING to a question asked by another candidate (you will see the system alert in the chat history), deliver the answer back to them.
+    - Set 'action' to "answer_partner".
+    - Set 'crossSessionPartnerId' to the ID of the person who asked (found in the system alert).
+    - Set 'crossSessionMessage' to the user's natural answer.
+    
+    Otherwise, continue normally evaluating the current candidate:
+    - Set 'action' to "continue".
+    - If they say yes, validate warmly and set 'matchConfirmed' to true.
+    - If they reject or show indifference, increment 'nextIndex'.
+    - If out of options, set 'closeSession' to true.
     
     Return strictly JSON matching this schema:
     {
       "replyText": "Your natural text response back to the user AS the Shadchan.",
+      "action": "continue", 
       "nextIndex": ${currentIdx},
       "matchConfirmed": false,
       "confirmedCandidateId": "${currentCandidate ? currentCandidate.candidateId : ""}",
-      "closeSession": false
+      "closeSession": false,
+      "crossSessionPartnerId": "",
+      "crossSessionMessage": ""
     }
   `;
 
-  const formattedChatLog = sessionData.messages.map(m => ({
-    role: m.sender === "ai" ? "model" : "user",
+const formattedChatLog = sessionData.messages.map(m => ({
+    role: m.sender === "user" ? "user" : "model", // Treat both 'ai' and 'system' injections as the model's memory
     parts: [{ text: m.text }]
   }));
 
-  const response = await ai.models.generateContent({
+const response = await ai.models.generateContent({
     model: GEMINI_MODEL,
     contents: formattedChatLog,
     config: {
