@@ -318,6 +318,13 @@ exports.handleIncomingWhatsApp = onRequest(
             });
             await partnerSessionRef.set(pData);
             await sendWhatsAppMessage(pData.userPhoneNumber, questionText);
+          } else {// Failsafe if the partner is no longer active
+            sessionData.status = "active";
+            const errorMsg = "I'm sorry, but it seems their matchmaking session is no longer active so I can't ask them right now. Would you like to make a decision based on their profile, or should we move on?";
+            
+            sessionData.messages.push({ sender: "ai", text: errorMsg, timestamp: new Date().toISOString() });
+            await sessionDoc.ref.set(sessionData);
+            await sendWhatsAppMessage(sessionData.userPhoneNumber, errorMsg);
           }
         } 
         else if (aiPayload.action === "answer_partner") {
@@ -392,7 +399,9 @@ async function generateAiResponse(sessionData) {
     config: { maxOutputTokens: 400 }
   });
 
-  return response.text;
+  // Remove markdown formatting if Gemini includes it
+  const rawText = response.text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  return JSON.parse(rawText);
 }
 
 async function generateAiResponseWithState(sessionData) {
@@ -443,7 +452,8 @@ const systemInstruction = `
   `;
 
 const formattedChatLog = sessionData.messages.map(m => ({
-    role: m.sender === "user" ? "user" : "model", // Treat both 'ai' and 'system' injections as the model's memory
+    // Treat 'system' alerts as user inputs so the AI replies to them
+    role: (m.sender === "user" || m.sender === "system") ? "user" : "model", 
     parts: [{ text: m.text }]
   }));
 
@@ -457,7 +467,9 @@ const response = await ai.models.generateContent({
     }
   });
 
-  return JSON.parse(response.text);
+  // Remove markdown formatting if Gemini includes it
+  const rawText = response.text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  return JSON.parse(rawText);
 }
 
 /**

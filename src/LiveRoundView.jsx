@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, use, act } from "react";
 import { db } from "./firebase";
-import { doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, setDoc, arrayUnion } from "firebase/firestore";
 import {
   MapPin,
   PartyPopper,
@@ -320,7 +320,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       return;
     }
 
-    const myRef = doc(db, "users", user.id);
+    const myRef = doc(db, "users", user.userId || user.id);
     const newEntry = {
       event: event.id,
       partnerId: partner.id,
@@ -370,8 +370,8 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       //   updatePayload.maybeSelections = arrayUnion(partner.id);
       if (emailInput) updatePayload.email = emailInput;
 
-      // 5. Save to Firestore
-      await updateDoc(myRef, updatePayload);
+      // 5. Save to Firestore (Creates the document if it's missing)
+      await setDoc(myRef, updatePayload, { merge: true });
 
       // Reset local UI states
       setDecisionMade(true);
@@ -380,6 +380,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       setIsPriority(false);
     } catch (err) {
       console.error("Error saving feedback:", err);
+      console.log("Feedback data:", newEntry);
       alert("Check your internet connection; feedback didn't save.");
     }
   };
