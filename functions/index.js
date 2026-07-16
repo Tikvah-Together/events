@@ -181,7 +181,7 @@ async function runAiShadchanFunctions(eventId) {
           eventId: eventId,
           userId: userId,
           userName: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
-          userPhoneNumber: formatForWhatsApp(user.phoneNumber),
+          userPhoneNumber: formatForWhatsApp(user.phone),
           userProfile: userProfile, 
           candidatePipeline: pipeline,
           currentPipelineIndex: 0,
@@ -190,16 +190,19 @@ async function runAiShadchanFunctions(eventId) {
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
-        const openingMessage = await generateAiResponse(sessionData);
+        const currentCandidate = sessionData.candidatePipeline[0];
+        
+        // Hardcode the template text for the AI's chat history context
+        const openingMessageText = `Hi!\n\nFollowing SY SmartMatch, you have a mutual match with ${currentCandidate.name}.\n\nAre you interested in setting up a first date?`;
 
         sessionData.messages.push({
           sender: "ai",
-          text: openingMessage,
+          text: openingMessageText,
           timestamp: new Date().toISOString()
         });
 
         await sessionRef.set(sessionData);
-        await sendWhatsAppMessage(sessionData.userPhoneNumber, openingMessage);
+        await sendWhatsAppTemplate(sessionData.userPhoneNumber, "intro", currentCandidate.name);
 
       } catch (userError) {
         // Catch individual user errors so it doesn't fail the entire Promise.all
@@ -375,7 +378,64 @@ exports.handleIncomingWhatsApp = onRequest(
   }
 );
 
-async function generateAiResponse(sessionData) {
+/**
+ * OFFICIAL WHATSAPP API: Send Template Message
+ */
+async function sendWhatsAppTemplate(toPhoneNumber, templateName, candidateName) {
+  const phoneId = whatsappPhoneId.value();
+  const accessToken = whatsappAccessToken.value();
+  
+  console.log(`[WhatsApp API] Sending template '${templateName}' to ${toPhoneNumber}...`);
+
+  const url = `https://graph.facebook.com/v23.0/${phoneId}/messages`;
+  
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: toPhoneNumber,
+    type: "template",
+    template: {
+      name: templateName,
+      language: {
+        code: "en_US" // Update this if you created the template in a different language!
+      },
+      components: [
+        {
+          type: "body",
+          parameters: [
+            {
+              type: "text",
+              text: candidateName
+            }
+          ]
+        }
+      ]
+    }
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error(`[WhatsApp API Error]`, data);
+    } else {
+      console.log(`[WhatsApp API] Successfully sent template. Message ID: ${data.messages[0].id}`);
+    }
+  } catch (error) {
+    console.error(`[WhatsApp API Request Failed]:`, error);
+  }
+}
+
+async function generateAiInitialMessage(sessionData) {// kept in case we need to switch from Whatsapp tp SMS or other channels in the future
   const currentCandidate = sessionData.candidatePipeline[sessionData.currentPipelineIndex];
   const ai = getAiClient();
 
@@ -398,10 +458,7 @@ async function generateAiResponse(sessionData) {
     contents: systemPrompt,
     config: { maxOutputTokens: 400 }
   });
-
-  // Remove markdown formatting if Gemini includes it
-  const rawText = response.text.replace(/```json/gi, '').replace(/```/g, '').trim();
-  return JSON.parse(rawText);
+  return response.text.trim();
 }
 
 async function generateAiResponseWithState(sessionData) {
