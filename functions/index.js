@@ -12,6 +12,9 @@ const whatsappPhoneId = defineSecret('WHATSAPP_PHONE_NUMBER_ID');
 const whatsappAccessToken = defineSecret('WHATSAPP_ACCESS_TOKEN');
 const whatsappVerifyToken = defineSecret('WHATSAPP_VERIFY_TOKEN');
 
+const telnyxApiKey = defineSecret('TELNYX_API_KEY');
+const telnyxPhoneNumber = defineSecret('TELNYX_PHONE_NUMBER');
+
 // Initialize Firebase Admin if it hasn't been initialized yet
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -31,7 +34,7 @@ function getAiClient() {
 exports.autoCompleteEventsAndRunAI = onSchedule({
   schedule: "every 1 hours",
   timeoutSeconds: 540,
-  secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken]
+  secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, telnyxApiKey, telnyxPhoneNumber]
 }, async (event) => {
   const now = admin.firestore.Timestamp.now();
   const eventsRef = db.collection("events");
@@ -83,7 +86,7 @@ exports.autoCompleteEventsAndRunAI = onSchedule({
 exports.manualEventCompletionTrigger = onDocumentUpdated({
   document: "events/{eventId}",
   timeoutSeconds: 540,
-  secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken]
+  secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, telnyxApiKey, telnyxPhoneNumber]
 }, async (event) => {
   const beforeData = event.data.before.data();
   const afterData = event.data.after.data();
@@ -156,7 +159,14 @@ async function runAiShadchanFunctions(eventId) {
         const pipeline = [...priorityYes, ...standardYes, ...maybes];
         
         // Use 'return' instead of 'continue' since we are inside a map callback
-        if (pipeline.length === 0) return; 
+        if (pipeline.length === 0) return;
+
+        // Use Telnyx formatting (must include +1)
+        const formattedPhone = formatForTelnyx(user.phone);
+        if (!formattedPhone) {
+          console.warn(`Skipping user ${userId}: No valid phone number found.`);
+          return; 
+        }
 
         const sessionId = `${eventId}_${userId}`;
         const sessionRef = db.collection("aiMatchmakerSessions").doc(sessionId);
@@ -181,7 +191,7 @@ async function runAiShadchanFunctions(eventId) {
           eventId: eventId,
           userId: userId,
           userName: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
-          userPhoneNumber: formatForWhatsApp(user.phone),
+          userPhoneNumber: formattedPhone, 
           userProfile: userProfile, 
           candidatePipeline: pipeline,
           currentPipelineIndex: 0,
@@ -190,9 +200,7 @@ async function runAiShadchanFunctions(eventId) {
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
-        const currentCandidate = sessionData.candidatePipeline[0];
-        
-        // Hardcode the template text for the AI's chat history context
+        const currentCandidate = pipeline[0];
         const openingMessageText = `Hi!\n\nFollowing SY SmartMatch, you have a mutual match with ${currentCandidate.name}.\n\nAre you interested in setting up a first date?`;
 
         sessionData.messages.push({
@@ -202,7 +210,8 @@ async function runAiShadchanFunctions(eventId) {
         });
 
         await sessionRef.set(sessionData);
-        await sendWhatsAppTemplate(sessionData.userPhoneNumber, "intro", currentCandidate.name);
+        await sendTelnyxMessage(sessionData.userPhoneNumber, openingMessageText);
+        // await sendWhatsAppTemplate(sessionData.userPhoneNumber, "intro", currentCandidate.name);
 
       } catch (userError) {
         // Catch individual user errors so it doesn't fail the entire Promise.all
@@ -221,10 +230,156 @@ async function runAiShadchanFunctions(eventId) {
 }
 
 /**
+ * OFFICIAL TELNYX API WEBHOOK ENDPOINT
+ */
+exports.handleIncomingTelnyx = onRequest(
+  { secrets: [geminiApiKey, telnyxApiKey, telnyxPhoneNumber] },
+  async (req, res) => {
+    // Telnyx sends POST requests containing event data
+    if (req.method !== "POST") {
+      res.sendStatus(405);
+      return;
+    }
+
+    const event = req.body?.data;
+    
+    // We only care about incoming messages
+    if (event?.event_type !== "message.received") {
+      res.sendStatus(200);
+      return;
+    }
+
+    const payload = event.payload;
+    if (!payload) {
+      res.sendStatus(200);
+      return;
+    }
+
+    const fromPhoneNumber = payload.from.phone_number;
+    const incomingText = payload.text;
+
+    if (!incomingText || !fromPhoneNumber) {
+      res.sendStatus(200);
+      return;
+    }      
+
+    try {
+      // Look for active OR paused sessions
+      const sessionSnapshot = await db.collection("aiMatchmakerSessions")
+        .where("userPhoneNumber", "==", fromPhoneNumber)
+        .where("status", "in", ["active", "paused_waiting_on_partner"])
+        .limit(1)
+        .get();
+
+      if (sessionSnapshot.empty) {
+        await sendTelnyxMessage(fromPhoneNumber, "No active matchmaking session found.");
+        res.sendStatus(200);
+        return;
+      }
+
+      const sessionDoc = sessionSnapshot.docs[0];
+      const sessionData = sessionDoc.data();
+
+      // 1. Log incoming user message
+      sessionData.messages.push({
+        sender: "user",
+        text: incomingText,
+        timestamp: new Date().toISOString()
+      });
+
+      // 2. Get AI Decision
+      const aiPayload = await generateAiResponseWithState(sessionData);
+
+      // 3. Log AI response
+      sessionData.messages.push({
+        sender: "ai",
+        text: aiPayload.replyText,
+        timestamp: new Date().toISOString()
+      });
+
+      // --- STATE MACHINE ROUTING ---
+
+      if (aiPayload.action === "ask_partner") {
+        // Pause current user
+        sessionData.status = "paused_waiting_on_partner";
+        await sessionDoc.ref.set(sessionData);
+        await sendTelnyxMessage(sessionData.userPhoneNumber, aiPayload.replyText);
+
+        // Inject question into partner's session
+        const partnerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
+        const partnerSessionRef = db.collection("aiMatchmakerSessions").doc(partnerSessionId);
+        const partnerSessionDoc = await partnerSessionRef.get();
+
+        if (partnerSessionDoc.exists) {
+          const pData = partnerSessionDoc.data();
+          const questionText = `[Shadchan Question from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". (ID: ${sessionData.userId}) - How should I respond?`;
+          
+          pData.messages.push({
+            sender: "system",
+            text: questionText,
+            timestamp: new Date().toISOString()
+          });
+          await partnerSessionRef.set(pData);
+          await sendTelnyxMessage(pData.userPhoneNumber, questionText);
+        } else {
+          sessionData.status = "active";
+          const errorMsg = "I'm sorry, but it seems their matchmaking session is no longer active so I can't ask them right now. Would you like to make a decision based on their profile, or should we move on?";
+          
+          sessionData.messages.push({ sender: "ai", text: errorMsg, timestamp: new Date().toISOString() });
+          await sessionDoc.ref.set(sessionData);
+          await sendTelnyxMessage(sessionData.userPhoneNumber, errorMsg);
+        }
+      } 
+      else if (aiPayload.action === "answer_partner") {
+        // Send answer back to original asker
+        const askerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
+        const askerSessionRef = db.collection("aiMatchmakerSessions").doc(askerSessionId);
+        const askerSessionDoc = await askerSessionRef.get();
+
+        if (askerSessionDoc.exists) {
+          const aData = askerSessionDoc.data();
+          const answerText = `[Shadchan Answer from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". Would you like to match with them?`;
+          
+          aData.status = "active"; // Unpause original asker
+          aData.messages.push({
+            sender: "system",
+            text: answerText,
+            timestamp: new Date().toISOString()
+          });
+          await askerSessionRef.set(aData);
+          await sendTelnyxMessage(aData.userPhoneNumber, answerText);
+        }
+
+        // Continue current user's session normally
+        await sessionDoc.ref.set(sessionData);
+        await sendTelnyxMessage(sessionData.userPhoneNumber, aiPayload.replyText);
+      } 
+      else {
+        // Normal continuation
+        sessionData.currentPipelineIndex = aiPayload.nextIndex;
+        if (aiPayload.closeSession) sessionData.status = "completed";
+
+        await sessionDoc.ref.set(sessionData);
+        await sendTelnyxMessage(sessionData.userPhoneNumber, aiPayload.replyText);
+
+        if (aiPayload.matchConfirmed && aiPayload.confirmedCandidateId) {
+          await recordConversationalMatch(sessionData.eventId, sessionData.userId, aiPayload.confirmedCandidateId);
+        }
+      }
+
+      res.sendStatus(200);
+    } catch (err) {
+      console.error("Error processing incoming Telnyx message:", err);
+      res.sendStatus(500);
+    }
+  }
+);
+
+/**
  * OFFICIAL WHATSAPP CLOUD API WEBHOOK ENDPOINT
  */
 exports.handleIncomingWhatsApp = onRequest(
-  { secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, whatsappVerifyToken] },
+  { secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, whatsappVerifyToken, telnyxApiKey, telnyxPhoneNumber] },
   async (req, res) => {
     // 1. Webhook Verification
     const VERIFY_TOKEN = whatsappVerifyToken.value();
@@ -584,6 +739,63 @@ async function recordConversationalMatch(eventId, userAId, userBId) {
     conversationalMatch: true,
     createdAt: admin.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
+}
+
+/**
+ * OFFICIAL TELNYX API: Send SMS Message
+ */
+async function sendTelnyxMessage(toPhoneNumber, messageText) {
+  const apiKey = telnyxApiKey.value();
+  const fromPhone = telnyxPhoneNumber.value();
+  
+  console.log(`[Telnyx API] Sending SMS to ${toPhoneNumber}...`);
+
+  const url = `https://api.telnyx.com/v2/messages`;
+  
+  const payload = {
+    from: fromPhone,
+    to: toPhoneNumber,
+    text: messageText
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      console.error(`[Telnyx API Error]`, data);
+    } else {
+      console.log(`[Telnyx API] Successfully sent SMS. Message ID: ${data.data.id}`);
+    }
+  } catch (error) {
+    console.error(`[Telnyx API Request Failed]:`, error);
+  }
+}
+
+function formatForTelnyx(phoneString) {
+  if (!phoneString) return "";
+  
+  // Strip everything but numbers
+  let cleaned = phoneString.toString().replace(/\D/g, '');
+  
+  // Format for US numbers
+  if (cleaned.length === 10) {
+    return `+1${cleaned}`;
+  }
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return `+${cleaned}`;
+  }
+  
+  return `+${cleaned}`; // Fallback assuming country code is included
 }
 
 function formatForWhatsApp(phoneString) {
