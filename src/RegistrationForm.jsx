@@ -306,35 +306,52 @@ export default function RegistrationForm() {
             </div>
           </div>
 
-          {/* Phone and email */}
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <label className="block text-sm font-medium mb-1">
-                Cell Phone Number
-              </label>
-              <input
-                type="tel"
-                placeholder="Phone number"
-                required
-                className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
-                onChange={(e) =>
-                  setFormData({ ...formData, phone: e.target.value })
-                }
-              />
+          {/* Phone, Email, and SMS Opt-in */}
+          <div className="flex flex-col gap-3">
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <label className="block text-sm font-medium mb-1">
+                  Cell Phone Number
+                </label>
+                <input
+                  type="tel"
+                  placeholder="Phone number"
+                  required
+                  className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
+                  onChange={(e) =>
+                    setFormData({ ...formData, phone: e.target.value })
+                  }
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium mb-1">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  placeholder="Email address"
+                  required
+                  className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
+                />
+              </div>
             </div>
-            <div className="flex-1">
-              <label className="block text-sm font-medium mb-1">
-                Email Address
-              </label>
+            
+            {/* 10DLC Compliance Checkbox */}
+            <div className="flex items-start gap-2 mt-1">
               <input
-                type="email"
-                placeholder="Email address"
-                required
-                className="w-full p-3 border border-slate-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
+                type="checkbox"
+                id="smsOptIn"
+                className="mt-1 w-4 h-4 accent-[#95B699] cursor-pointer"
                 onChange={(e) =>
-                  setFormData({ ...formData, email: e.target.value })
+                  setFormData({ ...formData, smsOptIn: e.target.checked })
                 }
               />
+              <label htmlFor="smsOptIn" className="text-xs text-slate-500 leading-snug cursor-pointer">
+                By checking this box, I agree to receive SMS matchmaking notifications from SY SmartMatch. Message and data rates may apply. Reply STOP to cancel. See our <a href="/privacy.html" target="_blank" rel="noreferrer" className="underline hover:text-[#95B699]">Privacy Policy</a> and <a href="/terms.html" target="_blank" rel="noreferrer" className="underline hover:text-[#95B699]">Terms</a>.
+              </label>
             </div>
           </div>
 
