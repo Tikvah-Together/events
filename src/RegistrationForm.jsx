@@ -48,6 +48,7 @@ export default function RegistrationForm() {
     dressStyle: "N/A",
     maritalStatus: "",
     anythingElse: "",
+    smsOptIn: false,
   });
 
   // Fetch events or specific event name

@@ -161,6 +161,11 @@ async function runAiShadchanFunctions(eventId) {
         // Use 'return' instead of 'continue' since we are inside a map callback
         if (pipeline.length === 0) return;
 
+        if (!user.smsOptIn) {
+          console.log(`Skipping SMS for user ${userId}: User did not opt-in to SMS notifications.`);
+          return; 
+        }
+
         // Use Telnyx formatting (must include +1)
         const formattedPhone = formatForTelnyx(user.phone);
         if (!formattedPhone) {
