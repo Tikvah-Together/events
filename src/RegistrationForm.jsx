@@ -339,7 +339,7 @@ export default function RegistrationForm() {
                 />
               </div>
             </div>
-            
+
             {/* 10DLC Compliance Checkbox */}
             <div className="flex items-start gap-2 mt-1">
               <input
@@ -351,7 +351,7 @@ export default function RegistrationForm() {
                 }
               />
               <label htmlFor="smsOptIn" className="text-xs text-slate-500 leading-snug cursor-pointer">
-                By checking this box, I agree to receive SMS matchmaking notifications from SY SmartMatch. Message and data rates may apply. Reply STOP to cancel. See our <a href="/privacy.html" target="_blank" rel="noreferrer" className="underline hover:text-[#95B699]">Privacy Policy</a> and <a href="/terms.html" target="_blank" rel="noreferrer" className="underline hover:text-[#95B699]">Terms</a>.
+                By checking this box, I agree to receive SMS matchmaking notifications from SY SmartMatch. Message frequency may vary. Message and data rates may apply. Reply HELP for help, STOP to cancel. See our <a href="/privacy.html" target="_blank" rel="noreferrer" className="underline hover:text-[#95B699]">Privacy Policy</a> and <a href="/terms.html" target="_blank" rel="noreferrer" className="underline hover:text-[#95B699]">Terms</a>.
               </label>
             </div>
           </div>
@@ -431,11 +431,10 @@ export default function RegistrationForm() {
                       key={opt}
                       type="button"
                       onClick={() => handleEthnicityToggle(opt)}
-                      className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
-                        isSelected(opt)
+                      className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isSelected(opt)
                           ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
                           : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
-                      }`}
+                        }`}
                     >
                       {opt}
                     </button>
@@ -447,11 +446,10 @@ export default function RegistrationForm() {
                   <button
                     type="button"
                     onClick={() => handleEthnicityToggle("Other Sephardic")}
-                    className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
-                      isSelected("Other Sephardic")
+                    className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isSelected("Other Sephardic")
                         ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
                         : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
-                    }`}
+                      }`}
                   >
                     Other Sephardic {isSelected("Other Sephardic") ? ":" : ""}
                   </button>
@@ -482,11 +480,10 @@ export default function RegistrationForm() {
                 <button
                   type="button"
                   onClick={() => handleEthnicityToggle("Ashkenaz")}
-                  className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
-                    isSelected("Ashkenaz")
+                  className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isSelected("Ashkenaz")
                       ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
                       : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
-                  }`}
+                    }`}
                 >
                   Ashkenaz
                 </button>
@@ -498,11 +495,10 @@ export default function RegistrationForm() {
                 <button
                   type="button"
                   onClick={() => handleEthnicityToggle("Other")}
-                  className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${
-                    isSelected("Other")
+                  className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isSelected("Other")
                       ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
                       : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
-                  }`}
+                    }`}
                 >
                   Other {isSelected("Other") ? ":" : ""}
                 </button>
