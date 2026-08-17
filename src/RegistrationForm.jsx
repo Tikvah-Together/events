@@ -30,6 +30,28 @@ export default function RegistrationForm() {
   const [selectedEventName, setSelectedEventName] = useState(""); // To show name if ID is hidden
   const [loading, setLoading] = useState(false);
 
+  const [ageGatePassed, setAgeGatePassed] = useState(false);
+  const [tempDob, setTempDob] = useState("");
+  const [ageGateError, setAgeGateError] = useState("");
+
+  const handleVerifyAge = (e) => {
+    e.preventDefault();
+    if (!tempDob) {
+      setAgeGateError("Please select your date of birth.");
+      return;
+    }
+
+    const age = calculateAge(tempDob);
+
+    if (age < 18) {
+      setAgeGateError("We're sorry, you must be at least 18 years old to register for SY SmartMatch.");
+    } else {
+      setAgeGateError("");
+      setFormData((prev) => ({ ...prev, birthDate: tempDob }));
+      setAgeGatePassed(true);
+    }
+  };
+
   const [formData, setFormData] = useState({
     eventId: urlEventId || "",
     firstName: "",
@@ -172,23 +194,22 @@ export default function RegistrationForm() {
       const regCheckSnap = await getDocs(regCheckQuery);
 
       if (!regCheckSnap.empty) {
-        // They are already registered for this event, so just update their profile info
-        const internalRegId = regCheckSnap.docs[0].id;
-        await updateDoc(doc(db, "registrations", internalRegId), {
-          userId: internalUserId,
-          eventId: eventId,
-          checkedIn: false,
-          tableNumber: null,
-          status: "pending invite",
-          groupId: "Unassigned",
-          timestamp: new Date(),
-          gender: formData.gender,
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-        });
-        alert(
-          "You are already registered for this event! We have updated your profile info with the latest details you provided.",
-        );
+        // They are already registered for this event, so just update their profile info if they want
+        if (window.confirm("You are already registered for this event! Would you like to have your profile updated with the latest details you provided?")) {
+          const internalRegId = regCheckSnap.docs[0].id;
+          await updateDoc(doc(db, "registrations", internalRegId), {
+            userId: internalUserId,
+            eventId: eventId,
+            checkedIn: false,
+            tableNumber: null,
+            status: "pending invite",
+            groupId: "Unassigned",
+            timestamp: new Date(),
+            gender: formData.gender,
+            firstName: formData.firstName,
+            lastName: formData.lastName,
+          });
+        }
         setLoading(false);
         return;
       } else {
@@ -238,6 +259,46 @@ export default function RegistrationForm() {
     }
     setLoading(false);
   };
+
+  // If the user has not verified their age yet, show ONLY the Age Gate
+  if (!ageGatePassed) {
+    return (
+      <div className="min-h-screen py-12 px-4 text-[#1E3D34]">
+        <div className="max-w-md mx-auto bg-[#DEE8DF] p-6 sm:p-10 rounded-2xl border border-[#95B699] shadow-sm text-center">
+          <h2 className="text-2xl font-bold text-[#1E3D34] mb-2">Age Verification</h2>
+          <p className="text-sm text-slate-600 mb-6">
+            You must be at least 18 years old to access SY SmartMatch and register for events.
+          </p>
+
+          <form onSubmit={handleVerifyAge} className="space-y-4 text-left">
+            <div>
+              <label className="block text-sm font-medium mb-1 text-[#1E3D34]">
+                Enter Your Date of Birth
+              </label>
+              <input
+                type="date"
+                required
+                className="w-full p-3 border border-[#95B699] rounded-lg bg-white outline-none focus:ring-2 focus:ring-[#95B699] text-[#1E3D34]"
+                value={tempDob}
+                onChange={(e) => setTempDob(e.target.value)}
+              />
+            </div>
+
+            {ageGateError && (
+              <p className="text-red-600 text-sm font-semibold text-center">{ageGateError}</p>
+            )}
+
+            <button
+              type="submit"
+              className="w-full bg-[#1E3D34] hover:bg-[#1E3D34]/90 text-white font-bold py-3 rounded-xl transition-colors shadow-md mt-2"
+            >
+              Continue to Registration
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen py-12 px-4 text-[#1E3D34]">
@@ -432,8 +493,8 @@ export default function RegistrationForm() {
                       type="button"
                       onClick={() => handleEthnicityToggle(opt)}
                       className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isSelected(opt)
-                          ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
-                          : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
+                        ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
+                        : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                         }`}
                     >
                       {opt}
@@ -447,8 +508,8 @@ export default function RegistrationForm() {
                     type="button"
                     onClick={() => handleEthnicityToggle("Other Sephardic")}
                     className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isSelected("Other Sephardic")
-                        ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
-                        : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
+                      ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
+                      : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                       }`}
                   >
                     Other Sephardic {isSelected("Other Sephardic") ? ":" : ""}
@@ -481,8 +542,8 @@ export default function RegistrationForm() {
                   type="button"
                   onClick={() => handleEthnicityToggle("Ashkenaz")}
                   className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isSelected("Ashkenaz")
-                      ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
-                      : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
+                    ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
+                    : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                     }`}
                 >
                   Ashkenaz
@@ -496,8 +557,8 @@ export default function RegistrationForm() {
                   type="button"
                   onClick={() => handleEthnicityToggle("Other")}
                   className={`px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isSelected("Other")
-                      ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
-                      : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
+                    ? "border-[#1E3D34] bg-[#95B699] text-[#1E3D34]"
+                    : "border-transparent bg-white text-[#1E3D34] shadow-sm hover:border-[#95B699]"
                     }`}
                 >
                   Other {isSelected("Other") ? ":" : ""}
