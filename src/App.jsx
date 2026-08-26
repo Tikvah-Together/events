@@ -4,8 +4,9 @@ import AdminDashboard from "./AdminDashboard";
 import Event from "./Event";
 import AdminGuard from "./AdminGuard";
 import SelfCheckIn from "./SelfCheckIn";
-import { Tablet, ShieldCheck, UserPlus } from "lucide-react";
+import { UserPlus } from "lucide-react";
 import RsvpPage from "./RSVP";
+import OrganizerDisplay from "./OrganizerDisplay";
 
 function Home() {
   return (
@@ -19,7 +20,6 @@ function Home() {
         meaningful.
       </p>
 
-      {/* 3-Way Entry Points */}
       <div className="grid grid-cols-1 md:grid-cols-1 gap-6 w-full max-w-4xl">
         {/* User Registration */}
         <Link
@@ -34,35 +34,6 @@ function Home() {
             Sign up for an upcoming event
           </p>
         </Link>
-
-        {/* COMMENT OUT THIS ENTRY FOR NOW 
-        <Link
-          to="/event"
-          className="group flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-orange-500 hover:shadow-lg transition-all text-center"
-        >
-          <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-full flex items-center justify-center mb-4 group-hover:bg-orange-500 group-hover:text-white transition-colors">
-            <Tablet size={24} />
-          </div>
-          <h3 className="font-bold text-lg text-slate-800">Event Login</h3>
-          <p className="text-sm text-slate-500 mt-2">
-            Claim this device and start your dates
-          </p>
-        </Link>
-
-        
-        <Link
-          to="/admin"
-          className="group flex flex-col items-center p-8 bg-white border border-slate-200 rounded-2xl hover:border-slate-800 hover:shadow-lg transition-all text-center"
-        >
-          <div className="w-12 h-12 bg-slate-50 text-slate-600 rounded-full flex items-center justify-center mb-4 group-hover:bg-slate-800 group-hover:text-white transition-colors">
-            <ShieldCheck size={24} />
-          </div>
-          <h3 className="font-bold text-lg text-slate-800">Admin</h3>
-          <p className="text-sm text-slate-500 mt-2">
-            Manage events and attendees
-          </p>
-        </Link>
-        */}
       </div>
     </div>
   );
@@ -102,6 +73,7 @@ function AppLayout() {
           />
           <Route path="/rsvp" element={<RsvpPage />} />
           <Route path="/selfcheckin" element={<SelfCheckIn />} />
+          <Route path="/organizer" element={<OrganizerDisplay />} />
         </Routes>
       </main>
 
@@ -112,7 +84,6 @@ function AppLayout() {
   );
 }
 
-// 4. App simply wraps the Layout in the Router
 function App() {
   return (
     <Router>
