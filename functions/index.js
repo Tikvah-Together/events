@@ -538,6 +538,58 @@ exports.handleIncomingWhatsApp = onRequest(
   }
 );
 
+exports.sweepStalledSessions = onSchedule({
+  schedule: "every 6 hours",
+  timeoutSeconds: 120,
+  secrets: [telnyxApiKey, telnyxPhoneNumber, whatsappPhoneId, whatsappAccessToken]
+}, async (event) => {
+  const waitThresholdMs = 72 * 60 * 60 * 1000; // 72 hours timeout
+  const nowMs = Date.now();
+
+  const snapshot = await db.collection("aiMatchmakerSessions")
+    .where("status", "==", "paused_waiting_on_partner")
+    .get();
+
+  if (snapshot.empty) return;
+
+  const batch = db.batch();
+  const unpausePromises = [];
+
+  snapshot.forEach((doc) => {
+    const sessionData = doc.data();
+    const messages = sessionData.messages || [];
+    
+    if (messages.length === 0) return;
+
+    // Grab the timestamp of the last message sent
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageTime = new Date(lastMessage.timestamp).getTime();
+
+    if (nowMs - lastMessageTime >= waitThresholdMs) {
+      console.log(`Unpausing session ${doc.id} due to partner timeout.`);
+
+      sessionData.status = "active";
+      const timeoutText = "It looks like they haven't responded to your question yet. We can continue to wait, or if you'd prefer, we can move on to your next candidate. What would you like to do?";
+      
+      sessionData.messages.push({
+        sender: "system",
+        text: timeoutText,
+        timestamp: new Date().toISOString()
+      });
+
+      batch.set(doc.ref, sessionData);
+
+      unpausePromises.push(sendTelnyxMessage(sessionData.userPhoneNumber, timeoutText)); 
+    }
+  });
+
+  if (unpausePromises.length > 0) {
+    await batch.commit();
+    await Promise.allSettled(unpausePromises);
+    console.log(`Swept and unpaused ${unpausePromises.length} stalled session(s).`);
+  }
+});
+
 /**
  * OFFICIAL WHATSAPP API: Send Template Message
  */
