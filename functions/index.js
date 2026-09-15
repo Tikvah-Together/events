@@ -206,7 +206,7 @@ async function runAiShadchanFunctions(eventId) {
         };
 
         const currentCandidate = pipeline[0];
-        const openingMessageText = `Hi!\n\nFollowing SY SmartMatch, you have a mutual match with ${currentCandidate.name}.\n\nAre you interested in setting up a first date?`;
+        const openingMessageText = `Hi ${user.firstName}!\n\nIt's SY SmartMatch, you have a mutual match with ${currentCandidate.name}.\n\nWould you be interested in setting up a first date?`;
 
         sessionData.messages.push({
           sender: "ai",
@@ -647,7 +647,7 @@ async function sendWhatsAppTemplate(toPhoneNumber, templateName, candidateName) 
   }
 }
 
-async function generateAiInitialMessage(sessionData) {// kept in case we need to switch from Whatsapp tp SMS or other channels in the future
+async function generateAiInitialMessage(sessionData) {// kept in case we need to switch from Whatsapp to SMS or other channels in the future
   const currentCandidate = sessionData.candidatePipeline[sessionData.currentPipelineIndex];
   const ai = getAiClient();
 
@@ -680,7 +680,7 @@ async function generateAiResponseWithState(sessionData) {
   const ai = getAiClient();
 
 const systemInstruction = `
-    You are an expert, empathetic personal matchmaker (Shadchan) messaging ${sessionData.userName} on WhatsApp on behalf of SY SmartMatch.
+    You are an expert, empathetic personal matchmaker (Shadchan) messaging ${sessionData.userName} on behalf of SY SmartMatch.
     
     CLIENT PROFILE CONTEXT:
     ${JSON.stringify(sessionData.userProfile, null, 2)}
@@ -709,7 +709,7 @@ const systemInstruction = `
     
     Return strictly JSON matching this schema:
     {
-      "replyText": "Your natural text response back to the user AS the Shadchan.",
+      "replyText": "Your natural text response back to the user AS the Shadchan. Keep most replies to 1-2 sentences. Be warm and natural, but don't over-explain. Do not repeat information the user already knows. Don't keep the conversation going unnecessarily. Sound like a human shadchan texting, not an AI assistant.",
       "action": "continue", 
       "nextIndex": ${currentIdx},
       "matchConfirmed": false,
