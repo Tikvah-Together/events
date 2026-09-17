@@ -8,9 +8,9 @@ const admin = require("firebase-admin");
 
 // Define Cloud Secrets (Evaluated safely at runtime)
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
-const whatsappPhoneId = defineSecret('WHATSAPP_PHONE_NUMBER_ID');
-const whatsappAccessToken = defineSecret('WHATSAPP_ACCESS_TOKEN');
-const whatsappVerifyToken = defineSecret('WHATSAPP_VERIFY_TOKEN');
+//const whatsappPhoneId = defineSecret('WHATSAPP_PHONE_NUMBER_ID');
+//const whatsappAccessToken = defineSecret('WHATSAPP_ACCESS_TOKEN');
+//const whatsappVerifyToken = defineSecret('WHATSAPP_VERIFY_TOKEN');
 
 const telnyxApiKey = defineSecret('TELNYX_API_KEY');
 const telnyxPhoneNumber = defineSecret('TELNYX_PHONE_NUMBER');
@@ -34,7 +34,7 @@ function getAiClient() {
 exports.autoCompleteEventsAndRunAI = onSchedule({
   schedule: "every 1 hours",
   timeoutSeconds: 540,
-  secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, telnyxApiKey, telnyxPhoneNumber]
+  secrets: [geminiApiKey, telnyxApiKey, telnyxPhoneNumber]
 }, async (event) => {
   const now = admin.firestore.Timestamp.now();
   const eventsRef = db.collection("events");
@@ -86,7 +86,7 @@ exports.autoCompleteEventsAndRunAI = onSchedule({
 exports.manualEventCompletionTrigger = onDocumentUpdated({
   document: "events/{eventId}",
   timeoutSeconds: 540,
-  secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, telnyxApiKey, telnyxPhoneNumber]
+  secrets: [geminiApiKey, telnyxApiKey, telnyxPhoneNumber]
 }, async (event) => {
   const beforeData = event.data.before.data();
   const afterData = event.data.after.data();
@@ -261,12 +261,14 @@ exports.handleIncomingTelnyx = onRequest(
     }
 
     const fromPhoneNumber = payload.from.phone_number;
-    const incomingText = payload.text;
+    const incomingText = payload.text || "";
+    const incomingMedia = payload.media || [];
+    const inboundMediaUrls = incomingMedia.map(m => m.url); // Extract file URLs
 
-    if (!incomingText || !fromPhoneNumber) {
+    if (!incomingText && inboundMediaUrls.length === 0) {
       res.sendStatus(200);
       return;
-    }      
+    }     
 
     try {
       // Look for active OR paused sessions
@@ -289,11 +291,12 @@ exports.handleIncomingTelnyx = onRequest(
       sessionData.messages.push({
         sender: "user",
         text: incomingText,
+        mediaUrls: inboundMediaUrls,
         timestamp: new Date().toISOString()
       });
 
       // 2. Get AI Decision
-      const aiPayload = await generateAiResponseWithState(sessionData);
+      const aiPayload = await generateAiResponseWithState(sessionData, inboundMediaUrls);
 
       // 3. Log AI response
       sessionData.messages.push({
@@ -316,16 +319,19 @@ exports.handleIncomingTelnyx = onRequest(
         const partnerSessionDoc = await partnerSessionRef.get();
 
         if (partnerSessionDoc.exists) {
-          const pData = partnerSessionDoc.data();
-          const questionText = `[Shadchan Question from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". (ID: ${sessionData.userId}) - How should I respond?`;
-          
-          pData.messages.push({
-            sender: "system",
-            text: questionText,
-            timestamp: new Date().toISOString()
-          });
-          await partnerSessionRef.set(pData);
-          await sendTelnyxMessage(pData.userPhoneNumber, questionText);
+            const pData = partnerSessionDoc.data();
+            const questionText = `[Shadchan Question from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". (ID: ${sessionData.userId}) - How should I respond?`;
+            
+            pData.messages.push({
+              sender: "system",
+              text: questionText,
+              mediaUrls: inboundMediaUrls, // Save to partner's history
+              timestamp: new Date().toISOString()
+            });
+            await partnerSessionRef.set(pData);
+            
+            // Pass the inbound media directly
+            await sendTelnyxMessage(pData.userPhoneNumber, questionText, inboundMediaUrls);
         } else {
           sessionData.status = "active";
           const errorMsg = "I'm sorry, but it seems their matchmaking session is no longer active so I can't ask them right now. Would you like to make a decision based on their profile, or should we move on?";
@@ -334,32 +340,33 @@ exports.handleIncomingTelnyx = onRequest(
           await sessionDoc.ref.set(sessionData);
           await sendTelnyxMessage(sessionData.userPhoneNumber, errorMsg);
         }
-      } 
-      else if (aiPayload.action === "answer_partner") {
+      } else if (aiPayload.action === "answer_partner") {
         // Send answer back to original asker
         const askerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
         const askerSessionRef = db.collection("aiMatchmakerSessions").doc(askerSessionId);
         const askerSessionDoc = await askerSessionRef.get();
 
         if (askerSessionDoc.exists) {
-          const aData = askerSessionDoc.data();
-          const answerText = `[Shadchan Answer from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". Would you like to match with them?`;
-          
-          aData.status = "active"; // Unpause original asker
-          aData.messages.push({
-            sender: "system",
-            text: answerText,
-            timestamp: new Date().toISOString()
-          });
-          await askerSessionRef.set(aData);
-          await sendTelnyxMessage(aData.userPhoneNumber, answerText);
+            const aData = askerSessionDoc.data();
+            const answerText = `[Shadchan Answer from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". Would you like to match with them?`;
+            
+            aData.status = "active"; // Unpause original asker
+            aData.messages.push({
+              sender: "system",
+              text: answerText,
+              mediaUrls: inboundMediaUrls, // Pull directly from the webhook event
+              timestamp: new Date().toISOString()
+            });
+            await askerSessionRef.set(aData);
+            
+            // Pass the inbound media directly
+            await sendTelnyxMessage(aData.userPhoneNumber, answerText, inboundMediaUrls);
         }
 
         // Continue current user's session normally
         await sessionDoc.ref.set(sessionData);
         await sendTelnyxMessage(sessionData.userPhoneNumber, aiPayload.replyText);
-      } 
-      else {
+      } else {
         // Normal continuation
         sessionData.currentPipelineIndex = aiPayload.nextIndex;
         if (aiPayload.closeSession) sessionData.status = "completed";
@@ -380,168 +387,10 @@ exports.handleIncomingTelnyx = onRequest(
   }
 );
 
-/**
- * OFFICIAL WHATSAPP CLOUD API WEBHOOK ENDPOINT
- */
-exports.handleIncomingWhatsApp = onRequest(
-  { secrets: [geminiApiKey, whatsappPhoneId, whatsappAccessToken, whatsappVerifyToken, telnyxApiKey, telnyxPhoneNumber] },
-  async (req, res) => {
-    // 1. Webhook Verification
-    const VERIFY_TOKEN = whatsappVerifyToken.value();
-    if (req.method === "GET") {
-      const mode = req.query["hub.mode"];
-      const token = req.query["hub.verify_token"];
-      const challenge = req.query["hub.challenge"];
-
-      if (mode === "subscribe" && token === VERIFY_TOKEN) {
-        res.status(200).send(challenge);
-        return;
-      } else {
-        res.sendStatus(403);
-        return;
-      }
-    }
-
-    // 2. Handle Incoming Messages (POST)
-    if (req.body.object === "whatsapp_business_account") {
-      const entry = req.body.entry?.[0];
-      const changes = entry?.changes?.[0];
-      const value = changes?.value;
-      const messages = value?.messages;
-
-      if (!messages || !messages[0]) {
-        res.sendStatus(200);
-        return;
-      }
-
-      const message = messages[0];
-      const fromPhoneNumber = message.from; 
-      const incomingText = message.text?.body;
-
-      if (!incomingText) {
-        res.sendStatus(200);
-        return;
-      }      
-
-      try {
-        // UPDATE: Look for active OR paused sessions
-        const sessionSnapshot = await db.collection("aiMatchmakerSessions")
-          .where("userPhoneNumber", "==", fromPhoneNumber)
-          .where("status", "in", ["active", "paused_waiting_on_partner"])
-          .limit(1)
-          .get();
-
-        if (sessionSnapshot.empty) {
-          await sendWhatsAppMessage(fromPhoneNumber, "No active matchmaking session found.");
-          res.sendStatus(200);
-          return;
-        }
-
-        const sessionDoc = sessionSnapshot.docs[0];
-        const sessionData = sessionDoc.data();
-
-        // 1. Log incoming user message
-        sessionData.messages.push({
-          sender: "user",
-          text: incomingText,
-          timestamp: new Date().toISOString()
-        });
-
-        // 2. Get AI Decision
-        const aiPayload = await generateAiResponseWithState(sessionData);
-
-        // 3. Log AI response
-        sessionData.messages.push({
-          sender: "ai",
-          text: aiPayload.replyText,
-          timestamp: new Date().toISOString()
-        });
-
-        // --- NEW STATE MACHINE ROUTING ---
-
-        if (aiPayload.action === "ask_partner") {
-          // Pause current user
-          sessionData.status = "paused_waiting_on_partner";
-          await sessionDoc.ref.set(sessionData);
-          await sendWhatsAppMessage(sessionData.userPhoneNumber, aiPayload.replyText);
-
-          // Inject question into partner's session
-          const partnerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
-          const partnerSessionRef = db.collection("aiMatchmakerSessions").doc(partnerSessionId);
-          const partnerSessionDoc = await partnerSessionRef.get();
-
-          if (partnerSessionDoc.exists) {
-            const pData = partnerSessionDoc.data();
-            const questionText = `[Shadchan Question from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". (ID: ${sessionData.userId}) - How should I respond?`;
-            
-            pData.messages.push({
-              sender: "system",
-              text: questionText,
-              timestamp: new Date().toISOString()
-            });
-            await partnerSessionRef.set(pData);
-            await sendWhatsAppMessage(pData.userPhoneNumber, questionText);
-          } else {// Failsafe if the partner is no longer active
-            sessionData.status = "active";
-            const errorMsg = "I'm sorry, but it seems their matchmaking session is no longer active so I can't ask them right now. Would you like to make a decision based on their profile, or should we move on?";
-            
-            sessionData.messages.push({ sender: "ai", text: errorMsg, timestamp: new Date().toISOString() });
-            await sessionDoc.ref.set(sessionData);
-            await sendWhatsAppMessage(sessionData.userPhoneNumber, errorMsg);
-          }
-        } 
-        else if (aiPayload.action === "answer_partner") {
-          // Send answer back to original asker
-          const askerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
-          const askerSessionRef = db.collection("aiMatchmakerSessions").doc(askerSessionId);
-          const askerSessionDoc = await askerSessionRef.get();
-
-          if (askerSessionDoc.exists) {
-            const aData = askerSessionDoc.data();
-            const answerText = `[Shadchan Answer from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". Would you like to match with them?`;
-            
-            aData.status = "active"; // Unpause original asker
-            aData.messages.push({
-              sender: "system",
-              text: answerText,
-              timestamp: new Date().toISOString()
-            });
-            await askerSessionRef.set(aData);
-            await sendWhatsAppMessage(aData.userPhoneNumber, answerText);
-          }
-
-          // Continue current user's session normally
-          await sessionDoc.ref.set(sessionData);
-          await sendWhatsAppMessage(sessionData.userPhoneNumber, aiPayload.replyText);
-        } 
-        else {
-          // Normal continuation
-          sessionData.currentPipelineIndex = aiPayload.nextIndex;
-          if (aiPayload.closeSession) sessionData.status = "completed";
-
-          await sessionDoc.ref.set(sessionData);
-          await sendWhatsAppMessage(sessionData.userPhoneNumber, aiPayload.replyText);
-
-          if (aiPayload.matchConfirmed && aiPayload.confirmedCandidateId) {
-            await recordConversationalMatch(sessionData.eventId, sessionData.userId, aiPayload.confirmedCandidateId);
-          }
-        }
-
-        res.sendStatus(200);
-      } catch (err) {
-        console.error("Error processing incoming WhatsApp message:", err);
-        res.sendStatus(400);
-      }
-    } else {
-      res.sendStatus(404);
-    }
-  }
-);
-
 exports.sweepStalledSessions = onSchedule({
   schedule: "every 6 hours",
   timeoutSeconds: 120,
-  secrets: [telnyxApiKey, telnyxPhoneNumber, whatsappPhoneId, whatsappAccessToken]
+  secrets: [telnyxApiKey, telnyxPhoneNumber]
 }, async (event) => {
   const waitThresholdMs = 72 * 60 * 60 * 1000; // 72 hours timeout
   const nowMs = Date.now();
@@ -590,96 +439,13 @@ exports.sweepStalledSessions = onSchedule({
   }
 });
 
-/**
- * OFFICIAL WHATSAPP API: Send Template Message
- */
-async function sendWhatsAppTemplate(toPhoneNumber, templateName, candidateName) {
-  const phoneId = whatsappPhoneId.value();
-  const accessToken = whatsappAccessToken.value();
-  
-  console.log(`[WhatsApp API] Sending template '${templateName}' to ${toPhoneNumber}...`);
-
-  const url = `https://graph.facebook.com/v23.0/${phoneId}/messages`;
-  
-  const payload = {
-    messaging_product: "whatsapp",
-    recipient_type: "individual",
-    to: toPhoneNumber,
-    type: "template",
-    template: {
-      name: templateName,
-      language: {
-        code: "en_US" // Update this if you created the template in a different language!
-      },
-      components: [
-        {
-          type: "body",
-          parameters: [
-            {
-              type: "text",
-              text: candidateName
-            }
-          ]
-        }
-      ]
-    }
-  };
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error(`[WhatsApp API Error]`, data);
-    } else {
-      console.log(`[WhatsApp API] Successfully sent template. Message ID: ${data.messages[0].id}`);
-    }
-  } catch (error) {
-    console.error(`[WhatsApp API Request Failed]:`, error);
-  }
-}
-
-async function generateAiInitialMessage(sessionData) {// kept in case we need to switch from Whatsapp to SMS or other channels in the future
-  const currentCandidate = sessionData.candidatePipeline[sessionData.currentPipelineIndex];
-  const ai = getAiClient();
-
-  const systemPrompt = `
-    You are a warm, traditional, yet modern AI matchmaker (Shadchan) messaging your client, ${sessionData.userName}, on WhatsApp on behalf of SY SmartMatch.
-    
-    CLIENT PROFILE CONTEXT:
-    ${JSON.stringify(sessionData.userProfile, null, 2)}
-    
-    Current candidate you are introducing to them: ${currentCandidate.name}.
-    Candidate details: ${currentCandidate.notes || "No extra biography info provided."}
-    
-    TASK: Write a highly personal, inviting, short WhatsApp message introduction. 
-    Act like an insightful, empathetic human who genuinely wants to see them happy. Use their profile context naturally if it helps make a connection.
-    End the text by asking if they would be open to exploring things with ${currentCandidate.name}.
-  `;
-
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: systemPrompt,
-    config: { maxOutputTokens: 400 }
-  });
-  return response.text.trim();
-}
-
-async function generateAiResponseWithState(sessionData) {
+async function generateAiResponseWithState(sessionData, currentInboundMediaUrls = []) {
   const currentIdx = sessionData.currentPipelineIndex;
   const pipeline = sessionData.candidatePipeline;
   const currentCandidate = pipeline[currentIdx];
   const ai = getAiClient();
 
-const systemInstruction = `
+  const systemInstruction = `
     You are an expert, empathetic personal matchmaker (Shadchan) messaging ${sessionData.userName} on behalf of SY SmartMatch.
     
     CLIENT PROFILE CONTEXT:
@@ -696,10 +462,13 @@ const systemInstruction = `
     - Set 'crossSessionPartnerId' to the candidate's ID (${currentCandidate ? currentCandidate.candidateId : ""}).
     - Set 'crossSessionMessage' to the exact question you want to ask them.
     
-    If the user is REPLYING to a question asked by another candidate (you will see the system alert in the chat history), deliver the answer back to them.
+    If the user is REPLYING to a question asked by another candidate, deliver the answer back to them.
     - Set 'action' to "answer_partner".
     - Set 'crossSessionPartnerId' to the ID of the person who asked (found in the system alert).
     - Set 'crossSessionMessage' to the user's natural answer.
+
+    CONTENT MODERATION RULE (CRITICAL):
+    If the user attaches an image/file that is inappropriate, explicit, offensive, or violates basic matchmaking decency, DO NOT set action to "ask_partner" or "answer_partner". Instead, set 'action' to "continue" and politely inform them that you cannot forward that type of image.
     
     Otherwise, continue normally evaluating the current candidate:
     - Set 'action' to "continue".
@@ -709,7 +478,7 @@ const systemInstruction = `
     
     Return strictly JSON matching this schema:
     {
-      "replyText": "Your natural text response back to the user AS the Shadchan. Keep most replies to 1-2 sentences. Be warm and natural, but don't over-explain. Do not repeat information the user already knows. Don't keep the conversation going unnecessarily. Sound like a human shadchan texting, not an AI assistant.",
+      "replyText": "Your natural text response back to the user AS the Shadchan. Keep most replies to 1-2 sentences. Be warm and natural, but don't over-explain.",
       "action": "continue", 
       "nextIndex": ${currentIdx},
       "matchConfirmed": false,
@@ -720,13 +489,42 @@ const systemInstruction = `
     }
   `;
 
-const formattedChatLog = sessionData.messages.map(m => ({
-    // Treat 'system' alerts as user inputs so the AI replies to them
-    role: (m.sender === "user" || m.sender === "system") ? "user" : "model", 
-    parts: [{ text: m.text }]
-  }));
+  const formattedChatLog = sessionData.messages.map(m => {
+    let text = m.text || "";
+    if (m.mediaUrls && m.mediaUrls.length > 0) {
+      text += `\n[User attached a file/photo. View the image data attached to this prompt.]`;
+    }
+    return {
+      role: (m.sender === "user" || m.sender === "system") ? "user" : "model", 
+      parts: [{ text: text }]
+    };
+  });
 
-const response = await ai.models.generateContent({
+  // Give the AI "eyes" for the current turn by fetching the file in memory
+  if (currentInboundMediaUrls && currentInboundMediaUrls.length > 0) {
+    const lastIndex = formattedChatLog.length - 1;
+    
+    for (const url of currentInboundMediaUrls) {
+      try {
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const mimeType = response.headers.get("content-type") || "image/jpeg";
+        
+        // Push actual file data so Gemini can see/hear it
+        formattedChatLog[lastIndex].parts.push({
+          inlineData: {
+            data: buffer.toString("base64"),
+            mimeType: mimeType
+          }
+        });
+      } catch (err) {
+        console.error("Failed to fetch media for AI:", err);
+      }
+    }
+  }
+
+  const response = await ai.models.generateContent({
     model: GEMINI_MODEL,
     contents: formattedChatLog,
     config: {
@@ -736,52 +534,8 @@ const response = await ai.models.generateContent({
     }
   });
 
-  // Remove markdown formatting if Gemini includes it
   const rawText = response.text.replace(/```json/gi, '').replace(/```/g, '').trim();
   return JSON.parse(rawText);
-}
-
-/**
- * OFFICIAL WHATSAPP API: Send Message
- */
-async function sendWhatsAppMessage(toPhoneNumber, messageText) {
-  const phoneId = whatsappPhoneId.value();
-  const accessToken = whatsappAccessToken.value();
-  
-  console.log(`[WhatsApp API] Sending message to ${toPhoneNumber}...`);
-
-  const url = `https://graph.facebook.com/v23.0/${phoneId}/messages`;
-  
-  const payload = {
-    messaging_product: "whatsapp",
-    recipient_type: "individual",
-    to: toPhoneNumber,
-    type: "text",
-    text: {
-      body: messageText
-    }
-  };
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error(`[WhatsApp API Error]`, data);
-    } else {
-      console.log(`[WhatsApp API] Successfully sent. Message ID: ${data.messages[0].id}`);
-    }
-  } catch (error) {
-    console.error(`[WhatsApp API Request Failed]:`, error);
-  }
 }
 
 async function recordConversationalMatch(eventId, userAId, userBId) {
@@ -801,7 +555,7 @@ async function recordConversationalMatch(eventId, userAId, userBId) {
 /**
  * OFFICIAL TELNYX API: Send SMS Message
  */
-async function sendTelnyxMessage(toPhoneNumber, messageText) {
+async function sendTelnyxMessage(toPhoneNumber, messageText, mediaUrls = []) {
   const apiKey = telnyxApiKey.value();
   const fromPhone = telnyxPhoneNumber.value();
   
@@ -814,6 +568,11 @@ async function sendTelnyxMessage(toPhoneNumber, messageText) {
     to: toPhoneNumber,
     text: messageText
   };
+  
+  // Attach media if provided
+  if (mediaUrls && mediaUrls.length > 0) {
+    payload.media_urls = mediaUrls;
+  }
 
   try {
     const response = await fetch(url, {
@@ -855,14 +614,14 @@ function formatForTelnyx(phoneString) {
   return `+${cleaned}`; // Fallback assuming country code is included
 }
 
-function formatForWhatsApp(phoneString) {
-  if (!phoneString) return "";
+// function formatForWhatsApp(phoneString) {
+//   if (!phoneString) return "";
 
-  let cleaned = phoneString.toString().replace(/\D/g, '');
+//   let cleaned = phoneString.toString().replace(/\D/g, '');
 
-  if (cleaned.length === 10) {
-    return `1${cleaned}`;
-  }
+//   if (cleaned.length === 10) {
+//     return `1${cleaned}`;
+//   }
 
-  return cleaned;
-}
+//   return cleaned;
+// }
