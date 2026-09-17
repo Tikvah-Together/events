@@ -320,8 +320,7 @@ exports.handleIncomingTelnyx = onRequest(
 
         if (partnerSessionDoc.exists) {
             const pData = partnerSessionDoc.data();
-            const questionText = `[Shadchan Question from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". (ID: ${sessionData.userId}) - How should I respond?`;
-            
+            const questionText = `[Shadchan Question from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". How should I respond?`;     
             pData.messages.push({
               sender: "system",
               text: questionText,
