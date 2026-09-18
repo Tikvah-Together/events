@@ -258,18 +258,22 @@ async function runAiShadchanFunctions(eventId) {
 }
 
 async function findSessionForPhone(phone) {
+  // Single-field equality filter — needs no composite index, so there's nothing to
+  // remember to set up before deploy. Sorting a handful of docs in memory is trivial.
   const snap = await db.collection("aiMatchmakerSessions")
     .where("userPhoneNumber", "==", phone)
-    .orderBy("createdAt", "desc")
-    .limit(5)
     .get();
   if (snap.empty) return null;
-  return snap.docs.find(d => d.data().status !== "opted_out") || snap.docs[0];
+
+  const docs = snap.docs.sort((a, b) => {
+    const at = a.data().createdAt?.toMillis?.() || 0;
+    const bt = b.data().createdAt?.toMillis?.() || 0;
+    return bt - at;
+  });
+
+  return docs.find(d => d.data().status !== "opted_out") || docs[0];
 }
 
-/**
- * OFFICIAL TELNYX API WEBHOOK ENDPOINT
- */
 /**
  * OFFICIAL TELNYX API WEBHOOK ENDPOINT
  */
@@ -325,7 +329,7 @@ exports.handleIncomingTelnyx = onRequest(
       const sessionData = await claimTurn(sessionDoc.ref, messageId);
       if (!sessionData) { res.sendStatus(200); return; } // a newer text is already handling this turn
 
-      await processClaimedTurn(sessionDoc.ref, sessionData, storedMedia);
+      await processClaimedTurn(sessionDoc.ref, sessionData);
 
     } catch (err) {
       console.error("Inbound handler failed:", err);
@@ -371,7 +375,7 @@ exports.retryUnansweredMessages = onSchedule({
     try {
       const claimed = await claimTurn(doc.ref, last.messageId);
       if (!claimed) continue; // superseded, or another instance just grabbed it
-      await processClaimedTurn(doc.ref, claimed, last.media || []);
+      await processClaimedTurn(doc.ref, claimed);
     } catch (err) {
       console.error(`Recovery failed for session ${doc.id}:`, err);
       await doc.ref.update({ processingUntil: null }).catch(() => {});
@@ -381,7 +385,7 @@ exports.retryUnansweredMessages = onSchedule({
 
 // Everything that happens once a turn is successfully claimed. Shared by the live webhook
 // and the recovery sweep below, so the two can never drift into different behavior.
-async function processClaimedTurn(ref, sessionData, inboundMedia = []) {
+async function processClaimedTurn(ref, sessionData) {
   // A send that fails with 40300 means this number opted out (STOP/CANCEL/etc) — mark
   // whichever session just tried to text them so we stop pretending things are fine.
   const markIfBlocked = async (targetRef, result) => {
@@ -394,7 +398,7 @@ async function processClaimedTurn(ref, sessionData, inboundMedia = []) {
     if (sessionData.status === "completed") sessionData.status = "active";
 
     const ownMedia = await resolveOwnMedia(sessionData.userId);
-    const ai = await generateAiResponseWithState(sessionData, inboundMedia, ownMedia);
+    const ai = await generateAiResponseWithState(sessionData, ownMedia);
 
     const firstName = (sessionData.userName || "").split(" ")[0];
     const stamp = () => new Date().toISOString();
@@ -601,7 +605,7 @@ function sanitizeAiPayload(p, sessionData, currentIdx) {
   };
 }
 
-async function generateAiResponseWithState(sessionData, inboundMedia = [], ownMedia = []) {
+async function generateAiResponseWithState(sessionData, ownMedia = []) {
   const currentIdx = Math.min(sessionData.currentPipelineIndex || 0, (sessionData.candidatePipeline || []).length);
   const pipeline = sessionData.candidatePipeline || [];
   const current = pipeline[currentIdx] || null;
@@ -651,13 +655,30 @@ WHAT TO DO
   // Only the tail of the thread — long histories are what starve the token budget.
   const recent = (sessionData.messages || []).slice(-MAX_HISTORY);
 
+  // Track how far back the current unanswered stretch goes, so a photo sent a message
+  // or two before this one still gets shown to the model, not just this exact turn's.
+  let lastAiPos = -1;
+  recent.forEach((m, i) => { if (m.sender === "ai") lastAiPos = i; });
+
   const contents = [];
-  for (const m of recent) {
-    const text = m.text || (m.mediaUrls?.length ? "(sent an attachment)" : "");
+  const mediaTasks = []; // { entry, mediaItems } — entry is a live reference, safe across trimming below
+
+  for (let i = 0; i < recent.length; i++) {
+    const m = recent[i];
+    const text = m.text || (m.media?.length ? "(sent an attachment)" : "");
     if (!text) continue; // Gemini rejects a part with no content at all
-    contents.push({ role: m.sender === "ai" ? "model" : "user", parts: [{ text }] });
+
+    // System notes (cross-session questions/answers) are the shadchan's own words, not the
+    // user's — mapping them to "user" would make the model think the person asked themselves.
+    const role = (m.sender === "ai" || m.sender === "system") ? "model" : "user";
+    const entry = { role, parts: [{ text }] };
+    contents.push(entry);
+
+    if (role === "user" && i > lastAiPos && m.media?.length) {
+      mediaTasks.push({ entry, mediaItems: m.media });
+    }
   }
-  // Gemini requires the first turn to be "user" — drop any leading AI turn if history got trimmed mid-thread.
+  // Gemini requires the first turn to be "user" — drop any leading model turn if history got trimmed mid-thread.
   while (contents.length && contents[0].role === "model") contents.shift();
   // Degenerate case: everything got filtered out. Give the model something to answer.
   if (!contents.length) {
@@ -665,15 +686,24 @@ WHAT TO DO
     contents.push({ role: "user", parts: [{ text: lastText }] });
   }
 
-  // Let the model actually see this turn's attachment so it can judge it.
-  if (contents.length && contents[contents.length - 1].role === "user") {
-    for (const m of inboundMedia) {
+  // Inline every not-yet-answered attachment — the whole current burst, not just this one
+  // call's — so a photo or PDF sent a message earlier is something the model can actually see.
+  // Capped so a burst of several large files can't blow past the request size limit and fail
+  // the whole call — anything past the cap just stays a text placeholder instead.
+  const MAX_INLINE_BYTES = 15 * 1024 * 1024;
+  let inlinedBytes = 0;
+
+  outer:
+  for (const task of mediaTasks) {
+    for (const m of task.mediaItems) {
+      if (inlinedBytes >= MAX_INLINE_BYTES) break outer;
       try {
         const r = await fetch(m.url);
         const buf = Buffer.from(await r.arrayBuffer());
-        contents[contents.length - 1].parts.push({
-          inlineData: { data: buf.toString("base64"), mimeType: m.contentType || "image/jpeg" }
-        });
+        if (inlinedBytes + buf.length > MAX_INLINE_BYTES) continue; // would push us over — skip, keep the placeholder
+        inlinedBytes += buf.length;
+        const mimeType = m.contentType === "application/pdf" ? "application/pdf" : (m.contentType || "image/jpeg");
+        task.entry.parts.push({ inlineData: { data: buf.toString("base64"), mimeType } });
       } catch (err) {
         console.error("inline media fetch failed:", err);
       }
@@ -755,7 +785,7 @@ async function recordConversationalMatch(eventId, confirmingUserId, otherUserId)
 /**
  * OFFICIAL TELNYX API: Send SMS Message
  */
-async function sendTelnyxMessage(toPhoneNumber, messageText, mediaUrls = []) {
+async function sendTelnyxMessage(toPhoneNumber, messageText, mediaUrls = [], attempt = 0) {
   const payload = { from: telnyxPhoneNumber.value(), to: toPhoneNumber };
   if (messageText) payload.text = messageText;
   if (mediaUrls?.length) payload.media_urls = mediaUrls.slice(0, 10); // Telnyx caps at 10
@@ -777,7 +807,7 @@ async function sendTelnyxMessage(toPhoneNumber, messageText, mediaUrls = []) {
       const code = String(data?.errors?.[0]?.code || "");
       console.error("[Telnyx Error]", code, JSON.stringify(data));
 
-      // 40300 = they texted STOP / CANCEL / END / QUIT. Every future send is blocked.
+      // 40300 = they texted STOP / CANCEL / END / QUIT. Never retry this — it's terminal.
       if (code === "40300") return { ok: false, blocked: true, code };
 
       // MMS rejected (expired URL, oversize, unsupported type) — get the words through at least.
@@ -785,12 +815,23 @@ async function sendTelnyxMessage(toPhoneNumber, messageText, mediaUrls = []) {
         console.warn("[Telnyx] MMS rejected, retrying as plain SMS");
         return await sendTelnyxMessage(toPhoneNumber, messageText, []);
       }
+
+      // Anything else (rate limit, transient 5xx) — one quick retry before giving up. A
+      // silently undelivered text looks identical to the shadchan going quiet.
+      if (attempt === 0) {
+        await new Promise(r => setTimeout(r, 800));
+        return await sendTelnyxMessage(toPhoneNumber, messageText, mediaUrls, 1);
+      }
       return { ok: false, blocked: false, code };
     }
 
     return { ok: true, id: data?.data?.id };
   } catch (error) {
     console.error("[Telnyx Request Failed]", error);
+    if (attempt === 0) {
+      await new Promise(r => setTimeout(r, 800));
+      return await sendTelnyxMessage(toPhoneNumber, messageText, mediaUrls, 1);
+    }
     return { ok: false, blocked: false };
   }
 }
