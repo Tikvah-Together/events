@@ -2,9 +2,17 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
-const { GoogleGenAI } = require("@google/genai");
+const { GoogleGenAI, Type } = require("@google/genai");
 const { defineSecret } = require('firebase-functions/params');
 const admin = require("firebase-admin");
+const { getStorage } = require("firebase-admin/storage");
+const crypto = require("crypto");
+
+const MMS_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"];
+const MMS_SAFE_BYTES = 600 * 1024;
+
+const TURN_LOCK_MS = 90 * 1000;
+const COALESCE_MS = 4000;
 
 // Define Cloud Secrets (Evaluated safely at runtime)
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
@@ -22,6 +30,21 @@ if (admin.apps.length === 0) {
 
 const db = admin.firestore();
 const GEMINI_MODEL = "gemini-3.1-flash-lite";
+const MAX_HISTORY = 24;
+const SHADCHAN_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    replyText:             { type: Type.STRING },
+    action:                { type: Type.STRING, enum: ["continue", "ask_partner", "answer_partner", "forward_media"] },
+    nextIndex:             { type: Type.INTEGER },
+    matchConfirmed:        { type: Type.BOOLEAN },
+    confirmedCandidateId:  { type: Type.STRING },
+    closeSession:          { type: Type.BOOLEAN },
+    crossSessionMessage:   { type: Type.STRING },
+    mediaKeys:             { type: Type.ARRAY, items: { type: Type.STRING } }
+  },
+  required: ["replyText", "action", "nextIndex", "matchConfirmed", "closeSession"]
+};
 
 /**
  * HELPER: Lazily instantiates the Gemini AI client at runtime using injected secrets
@@ -206,7 +229,7 @@ async function runAiShadchanFunctions(eventId) {
         };
 
         const currentCandidate = pipeline[0];
-        const openingMessageText = `Hi ${user.firstName}!\n\nIt's SY SmartMatch, you have a mutual match with ${currentCandidate.name}.\n\nWould you be interested in setting up a first date?`;
+        const openingMessageText = `Hi ${user.firstName || "there"}!\n\nIt's SY SmartMatch, you have a mutual match with ${currentCandidate.name}.\n\nWould you be interested in setting up a first date?`;
 
         sessionData.messages.push({
           sender: "ai",
@@ -234,157 +257,250 @@ async function runAiShadchanFunctions(eventId) {
   }
 }
 
+async function findSessionForPhone(phone) {
+  const snap = await db.collection("aiMatchmakerSessions")
+    .where("userPhoneNumber", "==", phone)
+    .orderBy("createdAt", "desc")
+    .limit(5)
+    .get();
+  if (snap.empty) return null;
+  return snap.docs.find(d => d.data().status !== "opted_out") || snap.docs[0];
+}
+
+/**
+ * OFFICIAL TELNYX API WEBHOOK ENDPOINT
+ */
 /**
  * OFFICIAL TELNYX API WEBHOOK ENDPOINT
  */
 exports.handleIncomingTelnyx = onRequest(
-  { secrets: [geminiApiKey, telnyxApiKey, telnyxPhoneNumber] },
+  { secrets: [geminiApiKey, telnyxApiKey, telnyxPhoneNumber], timeoutSeconds: 300, memory: "512MiB" },
   async (req, res) => {
-    // Telnyx sends POST requests containing event data
-    if (req.method !== "POST") {
-      res.sendStatus(405);
-      return;
-    }
+    if (req.method !== "POST") { res.sendStatus(405); return; }
 
     const event = req.body?.data;
-    
-    // We only care about incoming messages
-    if (event?.event_type !== "message.received") {
-      res.sendStatus(200);
-      return;
-    }
+    const payload = event?.payload;
+    if (event?.event_type !== "message.received" || !payload) { res.sendStatus(200); return; }
 
-    const payload = event.payload;
-    if (!payload) {
-      res.sendStatus(200);
-      return;
-    }
-
-    const fromPhoneNumber = payload.from.phone_number;
-    const incomingText = payload.text || "";
+    const messageId = payload.id || "";
+    const fromPhone = formatForTelnyx(payload.from?.phone_number);
+    const incomingText = (payload.text || "").trim();
     const incomingMedia = payload.media || [];
-    const inboundMediaUrls = incomingMedia.map(m => m.url); // Extract file URLs
-
-    if (!incomingText && inboundMediaUrls.length === 0) {
-      res.sendStatus(200);
-      return;
-    }     
+    if (!incomingText && !incomingMedia.length) { res.sendStatus(200); return; }
 
     try {
-      // Look for active OR paused sessions
-      const sessionSnapshot = await db.collection("aiMatchmakerSessions")
-        .where("userPhoneNumber", "==", fromPhoneNumber)
-        .where("status", "in", ["active", "paused_waiting_on_partner"])
-        .limit(1)
-        .get();
+      // Telnyx re-delivers webhooks. Without this the user gets double-texted.
+      if (messageId) {
+        const seenRef = db.collection("processedInbound").doc(messageId);
+        const isNew = await db.runTransaction(async (t) => {
+          if ((await t.get(seenRef)).exists) return false;
+          t.set(seenRef, { at: admin.firestore.FieldValue.serverTimestamp() });
+          return true;
+        });
+        if (!isNew) { res.sendStatus(200); return; }
+      }
 
-      if (sessionSnapshot.empty) {
-        await sendTelnyxMessage(fromPhoneNumber, "No active matchmaking session found.");
+      const sessionDoc = await findSessionForPhone(fromPhone);
+      if (!sessionDoc) {
+        await sendTelnyxMessage(fromPhone, "Hi, following up from SY SmartMatch. I don't have an open intro on this number right now, but tell me what you're looking for and I'll see what I can do.");
         res.sendStatus(200);
         return;
       }
 
-      const sessionDoc = sessionSnapshot.docs[0];
-      const sessionData = sessionDoc.data();
+      const snapshotData = sessionDoc.data();
+      const storedMedia = await persistInboundMedia(
+        { eventId: snapshotData.eventId, userId: snapshotData.userId },
+        incomingMedia
+      );
 
-      // 1. Log incoming user message
-      sessionData.messages.push({
+      await appendInbound(sessionDoc.ref, {
         sender: "user",
+        messageId,
         text: incomingText,
-        mediaUrls: inboundMediaUrls,
+        media: storedMedia,
+        mediaUrls: storedMedia.map(m => m.url),
         timestamp: new Date().toISOString()
       });
 
-      // 2. Get AI Decision
-      const aiPayload = await generateAiResponseWithState(sessionData, inboundMediaUrls);
+      const sessionData = await claimTurn(sessionDoc.ref, messageId);
+      if (!sessionData) { res.sendStatus(200); return; } // a newer text is already handling this turn
 
-      // 3. Log AI response
-      sessionData.messages.push({
-        sender: "ai",
-        text: aiPayload.replyText,
-        timestamp: new Date().toISOString()
-      });
+      await processClaimedTurn(sessionDoc.ref, sessionData, storedMedia);
 
-      // --- STATE MACHINE ROUTING ---
-
-      if (aiPayload.action === "ask_partner") {
-        // Pause current user
-        sessionData.status = "paused_waiting_on_partner";
-        await sessionDoc.ref.set(sessionData);
-        await sendTelnyxMessage(sessionData.userPhoneNumber, aiPayload.replyText);
-
-        // Inject question into partner's session
-        const partnerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
-        const partnerSessionRef = db.collection("aiMatchmakerSessions").doc(partnerSessionId);
-        const partnerSessionDoc = await partnerSessionRef.get();
-
-        if (partnerSessionDoc.exists) {
-            const pData = partnerSessionDoc.data();
-            const questionText = `[Shadchan Question from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". How should I respond?`;     
-            pData.messages.push({
-              sender: "system",
-              text: questionText,
-              mediaUrls: inboundMediaUrls, // Save to partner's history
-              timestamp: new Date().toISOString()
-            });
-            await partnerSessionRef.set(pData);
-            
-            // Pass the inbound media directly
-            await sendTelnyxMessage(pData.userPhoneNumber, questionText, inboundMediaUrls);
-        } else {
-          sessionData.status = "active";
-          const errorMsg = "I'm sorry, but it seems their matchmaking session is no longer active so I can't ask them right now. Would you like to make a decision based on their profile, or should we move on?";
-          
-          sessionData.messages.push({ sender: "ai", text: errorMsg, timestamp: new Date().toISOString() });
-          await sessionDoc.ref.set(sessionData);
-          await sendTelnyxMessage(sessionData.userPhoneNumber, errorMsg);
-        }
-      } else if (aiPayload.action === "answer_partner") {
-        // Send answer back to original asker
-        const askerSessionId = `${sessionData.eventId}_${aiPayload.crossSessionPartnerId}`;
-        const askerSessionRef = db.collection("aiMatchmakerSessions").doc(askerSessionId);
-        const askerSessionDoc = await askerSessionRef.get();
-
-        if (askerSessionDoc.exists) {
-            const aData = askerSessionDoc.data();
-            const answerText = `[Shadchan Answer from ${sessionData.userName}]: "${aiPayload.crossSessionMessage}". Would you like to match with them?`;
-            
-            aData.status = "active"; // Unpause original asker
-            aData.messages.push({
-              sender: "system",
-              text: answerText,
-              mediaUrls: inboundMediaUrls, // Pull directly from the webhook event
-              timestamp: new Date().toISOString()
-            });
-            await askerSessionRef.set(aData);
-            
-            // Pass the inbound media directly
-            await sendTelnyxMessage(aData.userPhoneNumber, answerText, inboundMediaUrls);
-        }
-
-        // Continue current user's session normally
-        await sessionDoc.ref.set(sessionData);
-        await sendTelnyxMessage(sessionData.userPhoneNumber, aiPayload.replyText);
-      } else {
-        // Normal continuation
-        sessionData.currentPipelineIndex = aiPayload.nextIndex;
-        if (aiPayload.closeSession) sessionData.status = "completed";
-
-        await sessionDoc.ref.set(sessionData);
-        await sendTelnyxMessage(sessionData.userPhoneNumber, aiPayload.replyText);
-
-        if (aiPayload.matchConfirmed && aiPayload.confirmedCandidateId) {
-          await recordConversationalMatch(sessionData.eventId, sessionData.userId, aiPayload.confirmedCandidateId);
-        }
-      }
-
-      res.sendStatus(200);
     } catch (err) {
-      console.error("Error processing incoming Telnyx message:", err);
-      res.sendStatus(500);
+      console.error("Inbound handler failed:", err);
+      await sendTelnyxMessage(fromPhone, "Sorry, give me a minute and text me again. Something's being slow on my end.").catch(() => {});
     }
+
+    res.sendStatus(200);
   }
 );
+
+// Safety net: catches any message that never got a reply — a slow generation that lost
+// a race with a lock, or an instance that died mid-turn. Runs often and cheaply; in the
+// healthy case this finds nothing, since normal turns finish in a few seconds.
+exports.retryUnansweredMessages = onSchedule({
+  schedule: "every 2 minutes",
+  timeoutSeconds: 120,
+  secrets: [geminiApiKey, telnyxApiKey, telnyxPhoneNumber]
+}, async (event) => {
+  const STUCK_AFTER_MS = 45 * 1000; // comfortably longer than the 4s coalesce + a normal reply
+  const nowMs = Date.now();
+
+  const snapshot = await db.collection("aiMatchmakerSessions")
+    .where("status", "==", "active")
+    .get();
+
+  if (snapshot.empty) return;
+
+  for (const doc of snapshot.docs) {
+    const data = doc.data();
+    const messages = data.messages || [];
+    if (!messages.length) continue;
+
+    const last = messages[messages.length - 1];
+    if (last.sender !== "user") continue; // already answered — nothing to recover
+
+    const age = nowMs - new Date(last.timestamp).getTime();
+    if (age < STUCK_AFTER_MS) continue; // still well within normal processing time
+
+    const lockUntil = data.processingUntil ? new Date(data.processingUntil).getTime() : 0;
+    if (nowMs < lockUntil) continue; // genuinely still being worked on
+
+    console.warn(`Recovering unanswered message in session ${doc.id}`);
+    try {
+      const claimed = await claimTurn(doc.ref, last.messageId);
+      if (!claimed) continue; // superseded, or another instance just grabbed it
+      await processClaimedTurn(doc.ref, claimed, last.media || []);
+    } catch (err) {
+      console.error(`Recovery failed for session ${doc.id}:`, err);
+      await doc.ref.update({ processingUntil: null }).catch(() => {});
+    }
+  }
+});
+
+// Everything that happens once a turn is successfully claimed. Shared by the live webhook
+// and the recovery sweep below, so the two can never drift into different behavior.
+async function processClaimedTurn(ref, sessionData, inboundMedia = []) {
+  // A send that fails with 40300 means this number opted out (STOP/CANCEL/etc) — mark
+  // whichever session just tried to text them so we stop pretending things are fine.
+  const markIfBlocked = async (targetRef, result) => {
+    if (result?.blocked) await targetRef.update({ status: "opted_out" }).catch(() => {});
+    return result;
+  };
+
+  try {
+    sessionData.messages = sessionData.messages || [];
+    if (sessionData.status === "completed") sessionData.status = "active";
+
+    const ownMedia = await resolveOwnMedia(sessionData.userId);
+    const ai = await generateAiResponseWithState(sessionData, inboundMedia, ownMedia);
+
+    const firstName = (sessionData.userName || "").split(" ")[0];
+    const stamp = () => new Date().toISOString();
+    const msg = (sender, text) => ({ sender, text, timestamp: stamp() });
+    const curIdx = sessionData.currentPipelineIndex || 0;
+
+    // Reuse the media we already loaded; drop keys the model invented.
+    let attachments = ai.mediaKeys.length ? ownMedia.filter(m => ai.mediaKeys.includes(m.key)) : [];
+    if (ai.mediaKeys.length && !attachments.length) {
+      console.warn("Model asked to forward keys that don't exist:", ai.mediaKeys);
+      ai.mediaKeys = [];
+      if (ai.action === "forward_media") ai.action = "continue";
+    }
+
+    // Applies on every path, not just "continue".
+    const basePatch = {
+      currentPipelineIndex: ai.nextIndex,
+      status: ai.closeSession ? "completed" : "active"
+    };
+
+    if (ai.matchConfirmed && ai.confirmedCandidateId) {
+      await recordConversationalMatch(sessionData.eventId, sessionData.userId, ai.confirmedCandidateId);
+    }
+
+    // Record every candidate skipped in this jump, not just the one right after curIdx.
+    for (let i = curIdx; i < ai.nextIndex; i++) {
+      const passedId = sessionData.candidatePipeline?.[i]?.candidateId;
+      if (passedId) await recordPass(sessionData.eventId, sessionData.userId, passedId);
+    }
+
+    // If WE still owe someone an answer, don't let a new question jump the queue —
+    // that's exactly how both threads end up paused waiting on each other.
+    if (ai.action === "ask_partner" && sessionData.pendingInboundQuestion) {
+      const owed = sessionData.pendingInboundQuestion;
+      ai.action = "continue";
+      ai.replyText = `Before that — what do you think about what ${owed.fromName} asked? ${owed.question}`;
+    }
+
+    if (ai.action === "ask_partner" && ai.crossSessionMessage) {
+      const partnerId = sessionData.candidatePipeline?.[curIdx]?.candidateId;
+      const partnerRef = partnerId
+        ? db.collection("aiMatchmakerSessions").doc(`${sessionData.eventId}_${partnerId}`)
+        : null;
+      const partnerSnap = partnerRef ? await partnerRef.get() : null;
+      const p = partnerSnap?.exists ? partnerSnap.data() : null;
+
+      if (!p) {
+        const fallback = "I can't get hold of them at the moment. Want to sit tight, or should I move on to the next one?";
+        await commitTurn(ref, { ...basePatch, status: "active" },
+          [msg("ai", ai.replyText), msg("ai", fallback)]);
+        await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
+        await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, fallback));
+
+      } else {
+        await commitTurn(ref, { ...basePatch, status: "paused_waiting_on_partner" },
+          [msg("ai", ai.replyText)]);
+        await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
+
+        const note = `Quick one from ${firstName} — ${ai.crossSessionMessage}`;
+        await commitCrossSession(partnerRef, {
+          status: "active",
+          pendingInboundQuestion: {
+            fromUserId: sessionData.userId,
+            fromName: firstName,
+            question: ai.crossSessionMessage,
+            askedAt: stamp()
+          }
+        }, [msg("system", note)]);
+        await markIfBlocked(partnerRef, await sendWithAttachments(p.userPhoneNumber, note, attachments));
+      }
+
+    } else if (ai.action === "answer_partner" || ai.action === "forward_media") {
+      const targetId = sessionData.pendingInboundQuestion?.fromUserId
+        || sessionData.candidatePipeline?.[curIdx]?.candidateId;
+
+      let delivered = false;
+      if (targetId) {
+        const askerRef = db.collection("aiMatchmakerSessions").doc(`${sessionData.eventId}_${targetId}`);
+        const askerSnap = await askerRef.get();
+        if (askerSnap.exists) {
+          const note = ai.crossSessionMessage
+            ? `Heard back from ${firstName} — ${ai.crossSessionMessage}`
+            : `${firstName} asked me to send this over.`;
+          await commitCrossSession(askerRef, { status: "active" }, [msg("system", note)]);
+          await markIfBlocked(askerRef, await sendWithAttachments(askerSnap.data().userPhoneNumber, note, attachments));
+          delivered = true;
+        }
+      }
+      if (!delivered) console.warn(`Undeliverable cross-session message; targetId=${targetId}`);
+
+      await commitTurn(ref, {
+        ...basePatch,
+        pendingInboundQuestion: admin.firestore.FieldValue.delete()
+      }, [msg("ai", ai.replyText)]);
+      await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
+
+    } else {
+      await commitTurn(ref, basePatch, [msg("ai", ai.replyText)]);
+      await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
+    }
+  } catch (err) {
+    console.error("processClaimedTurn failed:", err);
+    await ref.update({ processingUntil: null }).catch(() => {});
+    await sendTelnyxMessage(sessionData.userPhoneNumber, "Sorry, give me a minute and text me again. Something's being slow on my end.").catch(() => {});
+  }
+}
 
 exports.sweepStalledSessions = onSchedule({
   schedule: "every 6 hours",
@@ -400,200 +516,413 @@ exports.sweepStalledSessions = onSchedule({
 
   if (snapshot.empty) return;
 
-  const batch = db.batch();
-  const unpausePromises = [];
+  const stamp = () => new Date().toISOString();
+  const timeoutText = "It looks like they haven't responded to your question yet. We can continue to wait, or if you'd prefer, we can move on to your next candidate. What would you like to do?";
 
+  const docsToSweep = [];
   snapshot.forEach((doc) => {
-    const sessionData = doc.data();
-    const messages = sessionData.messages || [];
-    
-    if (messages.length === 0) return;
-
-    // Grab the timestamp of the last message sent
-    const lastMessage = messages[messages.length - 1];
-    const lastMessageTime = new Date(lastMessage.timestamp).getTime();
-
-    if (nowMs - lastMessageTime >= waitThresholdMs) {
-      console.log(`Unpausing session ${doc.id} due to partner timeout.`);
-
-      sessionData.status = "active";
-      const timeoutText = "It looks like they haven't responded to your question yet. We can continue to wait, or if you'd prefer, we can move on to your next candidate. What would you like to do?";
-      
-      sessionData.messages.push({
-        sender: "system",
-        text: timeoutText,
-        timestamp: new Date().toISOString()
-      });
-
-      batch.set(doc.ref, sessionData);
-
-      unpausePromises.push(sendTelnyxMessage(sessionData.userPhoneNumber, timeoutText)); 
-    }
+    const d = doc.data();
+    const messages = d.messages || [];
+    if (!messages.length) return;
+    const lastMessageTime = new Date(messages[messages.length - 1].timestamp).getTime();
+    if (nowMs - lastMessageTime >= waitThresholdMs) docsToSweep.push({ ref: doc.ref, data: d });
   });
 
-  if (unpausePromises.length > 0) {
+  if (!docsToSweep.length) return;
+
+  // Firestore batches cap at 500 writes — chunk so a big backlog doesn't throw.
+  const CHUNK = 450;
+  let swept = 0;
+
+  for (let i = 0; i < docsToSweep.length; i += CHUNK) {
+    const chunk = docsToSweep.slice(i, i + CHUNK);
+    const batch = db.batch();
+    const sends = [];
+
+    for (const { ref, data } of chunk) {
+      // Append-only: never overwrite messages another instance may have just added.
+      batch.set(ref, {
+        status: "active",
+        processingUntil: null,
+        messages: admin.firestore.FieldValue.arrayUnion({ sender: "system", text: timeoutText, timestamp: stamp() })
+      }, { merge: true });
+
+      // The partner is still holding a question that's now moot — clear it so it doesn't
+      // hang around telling the model this person owes an answer to an abandoned exchange.
+      const partnerId = data.candidatePipeline?.[data.currentPipelineIndex]?.candidateId;
+      if (partnerId) {
+        const partnerRef = db.collection("aiMatchmakerSessions").doc(`${data.eventId}_${partnerId}`);
+        batch.set(partnerRef, { pendingInboundQuestion: admin.firestore.FieldValue.delete() }, { merge: true });
+      }
+
+      sends.push(sendTelnyxMessage(data.userPhoneNumber, timeoutText));
+    }
+
     await batch.commit();
-    await Promise.allSettled(unpausePromises);
-    console.log(`Swept and unpaused ${unpausePromises.length} stalled session(s).`);
+    await Promise.allSettled(sends);
+    swept += chunk.length;
   }
+
+  console.log(`Swept and unpaused ${swept} stalled session(s).`);
 });
 
-async function generateAiResponseWithState(sessionData, currentInboundMediaUrls = []) {
-  const currentIdx = sessionData.currentPipelineIndex;
-  const pipeline = sessionData.candidatePipeline;
-  const currentCandidate = pipeline[currentIdx];
+// Strips every tell that makes it read like software.
+function humanize(text) {
+  if (!text) return "";
+  return text
+    .replace(/\[[^\]]*\]/g, "")                          // [bracketed stage directions]
+    .replace(/\*\*(.*?)\*\*/g, "$1")                     // markdown bold
+    .replace(/^\s*(AI|Assistant|Shadchan|Bot|System)\s*:\s*/i, "")
+    .replace(/\b(as an AI|as a language model|I'?m an AI)\b[^.!?]*[.!?]?/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function sanitizeAiPayload(p, sessionData, currentIdx) {
+  const len = (sessionData.candidatePipeline || []).length;
+
+  let nextIndex = Number.isInteger(p.nextIndex) ? p.nextIndex : currentIdx;
+  if (nextIndex < currentIdx) nextIndex = currentIdx;   // never rewind
+  if (nextIndex > len) nextIndex = len;                 // never run off the end
+
+  const reply = humanize(p.replyText);
+
+  return {
+    replyText: reply || "Sorry, my phone glitched — can you send that again?",
+    action: ["continue", "ask_partner", "answer_partner", "forward_media"].includes(p.action) ? p.action : "continue",
+    nextIndex,
+    matchConfirmed: p.matchConfirmed === true,
+    confirmedCandidateId: p.confirmedCandidateId || sessionData.candidatePipeline?.[currentIdx]?.candidateId || "",
+    // Only truly done when we've actually exhausted the pipeline.
+    closeSession: p.closeSession === true && nextIndex >= len,
+    crossSessionMessage: humanize(p.crossSessionMessage || ""),
+    mediaKeys: Array.isArray(p.mediaKeys) ? p.mediaKeys : []
+  };
+}
+
+async function generateAiResponseWithState(sessionData, inboundMedia = [], ownMedia = []) {
+  const currentIdx = Math.min(sessionData.currentPipelineIndex || 0, (sessionData.candidatePipeline || []).length);
+  const pipeline = sessionData.candidatePipeline || [];
+  const current = pipeline[currentIdx] || null;
+  const firstName = (sessionData.userName || "").split(" ")[0] || "there";
   const ai = getAiClient();
 
+  const pending = sessionData.pendingInboundQuestion || null;
+
   const systemInstruction = `
-    You are an expert, empathetic personal matchmaker (Shadchan) messaging ${sessionData.userName} on behalf of SY SmartMatch.
-    
-    CLIENT PROFILE CONTEXT:
-    ${JSON.stringify(sessionData.userProfile, null, 2)}
-    
-    CRITICAL PIPELINE DATA:
-    ${JSON.stringify(pipeline)}
-    
-    Current candidate under discussion: Index ${currentIdx} (${currentCandidate ? currentCandidate.name : "None left"}).
-    
-    GO-BETWEEN RULES:
-    If the user has a specific question for the candidate before deciding (e.g., "Does he mind if I work late?"), you must PAUSE and ask the candidate. 
-    - Set 'action' to "ask_partner".
-    - Set 'crossSessionPartnerId' to the candidate's ID (${currentCandidate ? currentCandidate.candidateId : ""}).
-    - Set 'crossSessionMessage' to the exact question you want to ask them.
-    
-    If the user is REPLYING to a question asked by another candidate, deliver the answer back to them.
-    - Set 'action' to "answer_partner".
-    - Set 'crossSessionPartnerId' to the ID of the person who asked (found in the system alert).
-    - Set 'crossSessionMessage' to the user's natural answer.
+You are a shadchan at SY SmartMatch. You are texting ${firstName} from your own phone.
 
-    CONTENT MODERATION RULE (CRITICAL):
-    If the user attaches an image/file that is inappropriate, explicit, offensive, or violates basic matchmaking decency, DO NOT set action to "ask_partner" or "answer_partner". Instead, set 'action' to "continue" and politely inform them that you cannot forward that type of image.
-    
-    Otherwise, continue normally evaluating the current candidate:
-    - Set 'action' to "continue".
-    - If they say yes, validate warmly and set 'matchConfirmed' to true.
-    - If they reject or show indifference, increment 'nextIndex'.
-    - If out of options, set 'closeSession' to true.
-    
-    Return strictly JSON matching this schema:
-    {
-      "replyText": "Your natural text response back to the user AS the Shadchan. Keep most replies to 1-2 sentences. Be warm and natural, but don't over-explain.",
-      "action": "continue", 
-      "nextIndex": ${currentIdx},
-      "matchConfirmed": false,
-      "confirmedCandidateId": "${currentCandidate ? currentCandidate.candidateId : ""}",
-      "closeSession": false,
-      "crossSessionPartnerId": "",
-      "crossSessionMessage": ""
-    }
-  `;
+HOW YOU WRITE
+- One or two sentences. Plain, warm, unhurried. Contractions. Lowercase is fine sometimes.
+- Never use brackets, asterisks, bullets, headers, numbered lists, or emoji.
+- Never narrate mechanics. Not "forwarding your question", not "processing", not "one moment while I".
+- Never call yourself a system, a service, a bot, automated, a model, or an AI. Never apologize on behalf of a platform.
+- Don't repeat their name in every message. Once at the start of a thread is plenty.
+- Don't parrot back what they just said before answering.
+- If they ask you something you don't know, say you'll find out and ask the other side. Never leave a question unanswered.
+- If they ask something off-topic, answer it briefly like a person would, then steer back.
 
-  const formattedChatLog = sessionData.messages.map(m => {
-    let text = m.text || "";
-    if (m.mediaUrls && m.mediaUrls.length > 0) {
-      text += `\n[User attached a file/photo. View the image data attached to this prompt.]`;
-    }
-    return {
-      role: (m.sender === "user" || m.sender === "system") ? "user" : "model", 
-      parts: [{ text: text }]
-    };
-  });
+ABOUT ${firstName}
+${JSON.stringify(sessionData.userProfile || {}, null, 2)}
 
-  // Give the AI "eyes" for the current turn by fetching the file in memory
-  if (currentInboundMediaUrls && currentInboundMediaUrls.length > 0) {
-    const lastIndex = formattedChatLog.length - 1;
-    
-    for (const url of currentInboundMediaUrls) {
+WHO YOU'RE DISCUSSING RIGHT NOW
+${current ? `${current.name} (id ${current.candidateId}). ${current.notes || ""}` : "You've been through everyone on the list."}
+They are candidate ${currentIdx + 1} of ${pipeline.length}. Do not mention anyone further down the list until this one is settled.
+
+${pending ? `WAITING ON ${firstName}
+${pending.fromName} asked: "${pending.question}". You already passed this along. When ${firstName} answers, set action to "answer_partner" and put their answer, in their voice, in crossSessionMessage.` : ""}
+
+FILES ${firstName} HAS SENT YOU (you may pass these along by key)
+${ownMedia.length ? JSON.stringify(ownMedia.map(m => ({ key: m.key, type: m.contentType, label: m.label || "" }))) : "None yet."}
+
+WHAT TO DO
+- Normal reply: action "continue".
+- They have a question for ${current ? current.name : "the other side"} you can't answer: action "ask_partner", put the question in crossSessionMessage. Tell ${firstName} you'll check, casually.
+- They're answering a question the other side asked: action "answer_partner", answer in crossSessionMessage.
+- They want you to send the other side a file they've already given you, or the other side asked for one and they said yes: action "forward_media" with the matching mediaKeys.
+- If the other side wants a resume or photo ${firstName} hasn't sent you, just ask for it in plain language with action "continue".
+- They're in: matchConfirmed true.
+- They pass: nextIndex ${currentIdx + 1} and introduce the next person warmly in the same message.
+- Only set closeSession true once nextIndex reaches ${pipeline.length}.
+- If they send something explicit, offensive, or not appropriate to pass along, action "continue" and tell them kindly you'd rather not send that one on.
+`.trim();
+
+  // Only the tail of the thread — long histories are what starve the token budget.
+  const recent = (sessionData.messages || []).slice(-MAX_HISTORY);
+
+  const contents = [];
+  for (const m of recent) {
+    const text = m.text || (m.mediaUrls?.length ? "(sent an attachment)" : "");
+    if (!text) continue; // Gemini rejects a part with no content at all
+    contents.push({ role: m.sender === "ai" ? "model" : "user", parts: [{ text }] });
+  }
+  // Gemini requires the first turn to be "user" — drop any leading AI turn if history got trimmed mid-thread.
+  while (contents.length && contents[0].role === "model") contents.shift();
+  // Degenerate case: everything got filtered out. Give the model something to answer.
+  if (!contents.length) {
+    const lastText = sessionData.messages?.[sessionData.messages.length - 1]?.text || "hi";
+    contents.push({ role: "user", parts: [{ text: lastText }] });
+  }
+
+  // Let the model actually see this turn's attachment so it can judge it.
+  if (contents.length && contents[contents.length - 1].role === "user") {
+    for (const m of inboundMedia) {
       try {
-        const response = await fetch(url);
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const mimeType = response.headers.get("content-type") || "image/jpeg";
-        
-        // Push actual file data so Gemini can see/hear it
-        formattedChatLog[lastIndex].parts.push({
-          inlineData: {
-            data: buffer.toString("base64"),
-            mimeType: mimeType
-          }
+        const r = await fetch(m.url);
+        const buf = Buffer.from(await r.arrayBuffer());
+        contents[contents.length - 1].parts.push({
+          inlineData: { data: buf.toString("base64"), mimeType: m.contentType || "image/jpeg" }
         });
       } catch (err) {
-        console.error("Failed to fetch media for AI:", err);
+        console.error("inline media fetch failed:", err);
       }
     }
   }
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: formattedChatLog,
-    config: {
-      systemInstruction: systemInstruction,
-      responseMimeType: "application/json",
-      maxOutputTokens: 1000
-    }
-  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: SHADCHAN_SCHEMA,
+          temperature: 0.8,
+          maxOutputTokens: 4096,                    // must cover thinking + output
+          thinkingConfig: { thinkingLevel: "low" }  // on 2.5-era models use { thinkingBudget: 0 }
+        }
+      });
 
-  const rawText = response.text.replace(/```json/gi, '').replace(/```/g, '').trim();
-  return JSON.parse(rawText);
+      const finish = response?.candidates?.[0]?.finishReason;
+      const raw = (response.text || "").replace(/```json/gi, "").replace(/```/g, "").trim();
+
+      if (!raw) {
+        console.error(`Empty Gemini body. finishReason=${finish} attempt=${attempt}`);
+        continue;
+      }
+      return sanitizeAiPayload(JSON.parse(raw), sessionData, currentIdx);
+    } catch (err) {
+      console.error(`Gemini attempt ${attempt} failed:`, err);
+    }
+  }
+
+  // Last resort — a human would never just stop replying.
+  return sanitizeAiPayload({
+    replyText: "Sorry, that one didn't come through on my end. Mind sending it again?",
+    action: "continue",
+    nextIndex: currentIdx,
+    matchConfirmed: false,
+    closeSession: false
+  }, sessionData, currentIdx);
 }
 
-async function recordConversationalMatch(eventId, userAId, userBId) {
-  const matchId = userAId < userBId ? `${userAId}_${userBId}` : `${userBId}_${userAId}`;
-  await db.collection("activeMatches").doc(matchId).set({
-    eventId: eventId,
-    user1Id: userAId < userBId ? userAId : userBId,
-    user2Id: userAId < userBId ? userBId : userAId,
-    status: "awaiting_initial_reply",
-    user1State: "pending",
-    user2State: "pending",
-    conversationalMatch: true,
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  }, { merge: true });
+async function recordConversationalMatch(eventId, confirmingUserId, otherUserId) {
+  const [u1, u2] = [confirmingUserId, otherUserId].sort();
+  const ref = db.collection("activeMatches").doc(`${u1}_${u2}`);
+  const myField = confirmingUserId === u1 ? "user1State" : "user2State";
+  const theirField = confirmingUserId === u1 ? "user2State" : "user1State";
+
+  await db.runTransaction(async (t) => {
+    const snap = await t.get(ref);
+    const prev = snap.exists ? snap.data() : {};
+
+    // They already moved past this person — don't resurrect it.
+    if (prev[theirField] === "passed") {
+      console.log(`Skipping match ${u1}_${u2}: other side already passed.`);
+      return;
+    }
+
+    const next = {
+      eventId,
+      user1Id: u1,
+      user2Id: u2,
+      conversationalMatch: true,
+      user1State: prev.user1State || "pending",
+      user2State: prev.user2State || "pending",
+      [myField]: "confirmed",
+      createdAt: prev.createdAt || admin.firestore.FieldValue.serverTimestamp()
+    };
+    next.status = next.user1State === "confirmed" && next.user2State === "confirmed"
+      ? "both_confirmed"
+      : "awaiting_other_side";
+
+    t.set(ref, next, { merge: true });
+  });
 }
 
 /**
  * OFFICIAL TELNYX API: Send SMS Message
  */
 async function sendTelnyxMessage(toPhoneNumber, messageText, mediaUrls = []) {
-  const apiKey = telnyxApiKey.value();
-  const fromPhone = telnyxPhoneNumber.value();
-  
-  console.log(`[Telnyx API] Sending SMS to ${toPhoneNumber}...`);
-
-  const url = `https://api.telnyx.com/v2/messages`;
-  
-  const payload = {
-    from: fromPhone,
-    to: toPhoneNumber,
-    text: messageText
-  };
-  
-  // Attach media if provided
-  if (mediaUrls && mediaUrls.length > 0) {
-    payload.media_urls = mediaUrls;
-  }
+  const payload = { from: telnyxPhoneNumber.value(), to: toPhoneNumber };
+  if (messageText) payload.text = messageText;
+  if (mediaUrls?.length) payload.media_urls = mediaUrls.slice(0, 10); // Telnyx caps at 10
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch("https://api.telnyx.com/v2/messages", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        Authorization: `Bearer ${telnyxApiKey.value()}`,
         "Content-Type": "application/json",
-        "Accept": "application/json"
+        Accept: "application/json"
       },
       body: JSON.stringify(payload)
     });
 
     const data = await response.json();
-    
+
     if (!response.ok) {
-      console.error(`[Telnyx API Error]`, data);
-    } else {
-      console.log(`[Telnyx API] Successfully sent SMS. Message ID: ${data.data.id}`);
+      const code = String(data?.errors?.[0]?.code || "");
+      console.error("[Telnyx Error]", code, JSON.stringify(data));
+
+      // 40300 = they texted STOP / CANCEL / END / QUIT. Every future send is blocked.
+      if (code === "40300") return { ok: false, blocked: true, code };
+
+      // MMS rejected (expired URL, oversize, unsupported type) — get the words through at least.
+      if (mediaUrls?.length) {
+        console.warn("[Telnyx] MMS rejected, retrying as plain SMS");
+        return await sendTelnyxMessage(toPhoneNumber, messageText, []);
+      }
+      return { ok: false, blocked: false, code };
     }
+
+    return { ok: true, id: data?.data?.id };
   } catch (error) {
-    console.error(`[Telnyx API Request Failed]:`, error);
+    console.error("[Telnyx Request Failed]", error);
+    return { ok: false, blocked: false };
   }
+}
+
+// Pull inbound media into our own bucket immediately — Telnyx URLs don't last.
+async function persistInboundMedia(sessionData, incomingMedia) {
+  if (!incomingMedia?.length) return [];
+  const bucket = getStorage().bucket();
+  const stored = [];
+
+  for (const item of incomingMedia.slice(0, 10)) {
+    try {
+      const res = await fetch(item.url);
+      if (!res.ok) { console.warn("media fetch failed", res.status); continue; }
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      const contentType = item.content_type || res.headers.get("content-type") || "application/octet-stream";
+      const ext = (contentType.split("/")[1] || "bin").split(";")[0];
+      const key = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+      const path = `shadchanMedia/${sessionData.eventId}/${sessionData.userId}/${key}.${ext}`;
+
+      const token = crypto.randomUUID();
+      const file = bucket.file(path);
+      await file.save(buffer, {
+        contentType,
+        resumable: false,
+        metadata: {
+          cacheControl: "public, max-age=31536000",
+          metadata: { firebaseStorageDownloadTokens: token }   // nested = custom metadata
+        }
+      });
+
+      const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(path)}?alt=media&token=${token}`;
+
+      stored.push({
+        key,
+        url,
+        token,
+        storagePath: path,
+        contentType,
+        bytes: buffer.length,
+        label: contentType === "application/pdf" ? "document" : "photo",
+        ownerId: sessionData.userId,
+        receivedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("persistInboundMedia failed:", err);
+    }
+  }
+
+  if (stored.length) {
+    await db.collection("users").doc(sessionData.userId).set(
+      { shadchanMedia: admin.firestore.FieldValue.arrayUnion(...stored) },
+      { merge: true }
+    );
+  }
+  return stored;
+}
+
+// You can only ever forward files the sender gave you themselves.
+async function resolveOwnMedia(userId, mediaKeys) {
+  const snap = await db.collection("users").doc(userId).get();
+  const all = snap.data()?.shadchanMedia || [];
+  if (!mediaKeys?.length) return all;
+  return all.filter(m => mediaKeys.includes(m.key));
+}
+
+// Images go as MMS; PDFs and anything oversized go as a bare link in the body.
+async function sendWithAttachments(toPhone, text, mediaItems = []) {
+  const asMms = [];
+  const asLink = [];
+
+  for (const m of mediaItems) {
+    const isImage = MMS_IMAGE_TYPES.includes((m.contentType || "").toLowerCase());
+    if (isImage && m.bytes <= MMS_SAFE_BYTES) asMms.push(m.url);
+    else asLink.push(m.url);
+  }
+
+  const body = asLink.length ? `${text}\n\n${asLink.join("\n")}` : text;
+  return await sendTelnyxMessage(toPhone, body, asMms);
+}
+
+async function appendInbound(ref, message) {
+  await ref.set(
+    { messages: admin.firestore.FieldValue.arrayUnion(message) },
+    { merge: true }
+  );
+}
+
+// Wait a beat for a follow-up text, then only the newest inbound generates a reply.
+async function claimTurn(ref, messageId) {
+  await new Promise(r => setTimeout(r, COALESCE_MS));
+
+  return db.runTransaction(async (t) => {
+    const snap = await t.get(ref);
+    if (!snap.exists) return null;
+    const d = snap.data();
+
+    const lastInbound = [...(d.messages || [])].reverse().find(m => m.sender === "user");
+    if (lastInbound?.messageId && lastInbound.messageId !== messageId) return null; // superseded
+
+    const lockUntil = d.processingUntil ? new Date(d.processingUntil).getTime() : 0;
+    if (Date.now() < lockUntil) return null; // another instance is mid-turn
+
+    t.update(ref, { processingUntil: new Date(Date.now() + TURN_LOCK_MS).toISOString() });
+    return d;
+  });
+}
+
+// Append-only commit — never overwrites a concurrent writer's messages.
+async function commitTurn(ref, patch, newMessages = []) {
+  const body = { ...patch, processingUntil: null };
+  if (newMessages.length) body.messages = admin.firestore.FieldValue.arrayUnion(...newMessages);
+  await ref.set(body, { merge: true });
+}
+
+// Cross-session write: never touch their turn lock, they may be mid-generation.
+async function commitCrossSession(ref, patch, newMessages = []) {
+  const body = { ...patch };
+  if (newMessages.length) body.messages = admin.firestore.FieldValue.arrayUnion(...newMessages);
+  await ref.set(body, { merge: true });
+}
+
+async function recordPass(eventId, passingUserId, otherUserId) {
+  const [u1, u2] = [passingUserId, otherUserId].sort();
+  const myField = passingUserId === u1 ? "user1State" : "user2State";
+  await db.collection("activeMatches").doc(`${u1}_${u2}`).set({
+    eventId, user1Id: u1, user2Id: u2,
+    conversationalMatch: true,
+    [myField]: "passed",
+    status: "declined"
+  }, { merge: true });
 }
 
 function formatForTelnyx(phoneString) {
