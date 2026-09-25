@@ -405,12 +405,18 @@ async function processClaimedTurn(ref, sessionData) {
     const msg = (sender, text) => ({ sender, text, timestamp: stamp() });
     const curIdx = sessionData.currentPipelineIndex || 0;
 
-    // Reuse the media we already loaded; drop keys the model invented.
+    // Reuse the media we already loaded, matched by the key the model gave us.
     let attachments = ai.mediaKeys.length ? ownMedia.filter(m => ai.mediaKeys.includes(m.key)) : [];
     if (ai.mediaKeys.length && !attachments.length) {
       console.warn("Model asked to forward keys that don't exist:", ai.mediaKeys);
-      ai.mediaKeys = [];
-      if (ai.action === "forward_media") ai.action = "continue";
+    }
+    // If we're meant to be sending something but couldn't resolve which file from the model's
+    // keys, fall back to whatever was actually just sent. This is the bug that was silently
+    // swallowing resumes: forward_media used to get downgraded to a plain reply the instant the
+    // model's key didn't match exactly, so the file never went anywhere even though the person
+    // got told it had been.
+    if ((ai.action === "forward_media" || ai.action === "answer_partner") && !attachments.length) {
+      attachments = collectBurstMedia(sessionData.messages);
     }
 
     // Applies on every path, not just "continue".
@@ -645,6 +651,7 @@ WHAT TO DO
 - They have a question for ${current ? current.name : "the other side"} you can't answer: action "ask_partner", put the question in crossSessionMessage. Tell ${firstName} you'll check, casually.
 - They're answering a question the other side asked: action "answer_partner", answer in crossSessionMessage.
 - They want you to send the other side a file they've already given you, or the other side asked for one and they said yes: action "forward_media" with the matching mediaKeys.
+- If they send a photo, document, or other file — even with no caption — while a resume or photo is expected, that IS the file arriving. Don't ask them to send it again: acknowledge it and use forward_media (or fold it into answer_partner) right away.
 - If the other side wants a resume or photo ${firstName} hasn't sent you, just ask for it in plain language with action "continue".
 - They're in: matchConfirmed true.
 - They pass: nextIndex ${currentIdx + 1} and introduce the next person warmly in the same message.
@@ -897,6 +904,20 @@ async function resolveOwnMedia(userId, mediaKeys) {
   const all = snap.data()?.shadchanMedia || [];
   if (!mediaKeys?.length) return all;
   return all.filter(m => mediaKeys.includes(m.key));
+}
+
+// The media sent since our last reply — used to forward files reliably even when the model's
+// mediaKeys don't cleanly match, since a person doesn't need to reference their resume by an
+// exact ID for a real matchmaker to know which file they mean.
+function collectBurstMedia(messages = []) {
+  let lastAiPos = -1;
+  messages.forEach((m, i) => { if (m.sender === "ai") lastAiPos = i; });
+  const collected = [];
+  for (let i = lastAiPos + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.sender === "user" && m.media?.length) collected.push(...m.media);
+  }
+  return collected;
 }
 
 // Images go as MMS; PDFs and anything oversized go as a bare link in the body.
