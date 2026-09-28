@@ -299,6 +299,9 @@ exports.handleIncomingTelnyx = onRequest(
     const fromPhone = formatForTelnyx(payload.from?.phone_number);
     const incomingText = (payload.text || "").trim();
     const incomingMedia = payload.media || [];
+    if (incomingMedia.length) {
+      console.log(`[Shadchan] Inbound media from ${fromPhone}:`, incomingMedia.map(m => ({ url: m.url, content_type: m.content_type })));
+    }
     if (!incomingText && !incomingMedia.length) { res.sendStatus(200); return; }
 
     try {
@@ -408,6 +411,7 @@ async function processClaimedTurn(ref, sessionData) {
 
     const ownMedia = await resolveOwnMedia(sessionData.userId);
     const ai = await generateAiResponseWithState(sessionData, ownMedia);
+    console.log(`[Shadchan] AI decision for ${sessionData.userId}: action=${ai.action} mediaKeys=${JSON.stringify(ai.mediaKeys)} crossSessionMessage=${ai.crossSessionMessage ? JSON.stringify(ai.crossSessionMessage) : "(none)"}`);
 
     const firstName = (sessionData.userName || "").split(" ")[0];
     const stamp = () => new Date().toISOString();
@@ -417,7 +421,7 @@ async function processClaimedTurn(ref, sessionData) {
     // Reuse the media we already loaded, matched by the key the model gave us.
     let attachments = ai.mediaKeys.length ? ownMedia.filter(m => ai.mediaKeys.includes(m.key)) : [];
     if (ai.mediaKeys.length && !attachments.length) {
-      console.warn("Model asked to forward keys that don't exist:", ai.mediaKeys);
+      console.warn("Model asked to forward keys that don't exist:", ai.mediaKeys, "available keys:", ownMedia.map(m => m.key));
     }
     // If we're meant to be sending something but couldn't resolve which file from the model's
     // keys, fall back to whatever was actually just sent. This is the bug that was silently
@@ -426,7 +430,9 @@ async function processClaimedTurn(ref, sessionData) {
     // got told it had been.
     if ((ai.action === "forward_media" || ai.action === "answer_partner") && !attachments.length) {
       attachments = collectBurstMedia(sessionData.messages);
+      console.log(`[Shadchan] Fell back to collectBurstMedia: found ${attachments.length} item(s)`, attachments.map(a => a.key));
     }
+    console.log(`[Shadchan] Final attachments to forward: ${attachments.length}`, attachments.map(a => ({ key: a.key, contentType: a.contentType })));
 
     // Applies on every path, not just "continue".
     const basePatch = {
@@ -482,8 +488,11 @@ async function processClaimedTurn(ref, sessionData) {
             askedAt: stamp()
           }
         }, [msg("system", note)]);
-        await markIfBlocked(partnerRef, await sendWithAttachments(p.userPhoneNumber, note, attachments));
-      }
+        console.log(`[Shadchan] Delivering to partner ${p.userPhoneNumber}: note="${note}" attachments=${attachments.length}`);
+        const partnerSendResult = await sendWithAttachments(p.userPhoneNumber, note, attachments);
+        console.log(`[Shadchan] Partner send result:`, partnerSendResult);
+        await markIfBlocked(partnerRef, partnerSendResult);
+    }
 
     } else if (ai.action === "answer_partner" || ai.action === "forward_media") {
       const targetId = sessionData.pendingInboundQuestion?.fromUserId
@@ -498,7 +507,10 @@ async function processClaimedTurn(ref, sessionData) {
             ? `Heard back from ${firstName} — ${ai.crossSessionMessage}`
             : `${firstName} asked me to send this over.`;
           await commitCrossSession(askerRef, { status: "active" }, [msg("system", note)]);
-          await markIfBlocked(askerRef, await sendWithAttachments(askerSnap.data().userPhoneNumber, note, attachments));
+          console.log(`[Shadchan] Delivering to asker ${askerSnap.data().userPhoneNumber}: note="${note}" attachments=${attachments.length}`);
+          const askerSendResult = await sendWithAttachments(askerSnap.data().userPhoneNumber, note, attachments);
+          console.log(`[Shadchan] Asker send result:`, askerSendResult);
+          await markIfBlocked(askerRef, askerSendResult);
           delivered = true;
         }
       }
@@ -628,6 +640,9 @@ async function generateAiResponseWithState(sessionData, ownMedia = []) {
   const ai = getAiClient();
 
   const pending = sessionData.pendingInboundQuestion || null;
+  if (pending) {
+    console.log(`[Shadchan] Pending question for ${firstName} from ${pending.fromName}: "${pending.question}"`);
+  }
 
   const systemInstruction = `
 You are a shadchan at SY SmartMatch. You are texting ${firstName} from your own phone.
@@ -691,6 +706,7 @@ WHAT TO DO
           ? "(sent an attachment)"
           : `(sent a file — ${item.label || "document"})`)
         .join(" ");
+      console.log(`[Shadchan] Message ${i} media placeholder: "${text}" (types: ${m.media.map(x => x.contentType).join(", ")})`);
     }
     if (!text) continue; // Gemini rejects a part with no content at all
 
@@ -723,7 +739,10 @@ WHAT TO DO
   outer:
   for (const task of mediaTasks) {
     for (const m of task.mediaItems) {
-      if (!GEMINI_INLINEABLE_TYPES.includes((m.contentType || "").toLowerCase())) continue;
+      if (!GEMINI_INLINEABLE_TYPES.includes((m.contentType || "").toLowerCase())) {
+        console.log(`[Shadchan] Skipping inline for key=${m.key} contentType=${m.contentType} — not a Gemini-readable type`);
+        continue;
+      }
       if (inlinedBytes >= MAX_INLINE_BYTES) break outer;
       try {
         const r = await fetch(m.url);
@@ -731,6 +750,7 @@ WHAT TO DO
         if (inlinedBytes + buf.length > MAX_INLINE_BYTES) continue; // would push us over — skip, keep the placeholder
         inlinedBytes += buf.length;
         task.entry.parts.push({ inlineData: { data: buf.toString("base64"), mimeType: m.contentType } });
+        console.log(`[Shadchan] Inlined key=${m.key} contentType=${m.contentType} bytes=${buf.length}`);
       } catch (err) {
         console.error("inline media fetch failed:", err);
       }
@@ -759,6 +779,7 @@ WHAT TO DO
         console.error(`Empty Gemini body. finishReason=${finish} attempt=${attempt}`);
         continue;
       }
+      console.log(`[Shadchan] Gemini raw response (attempt ${attempt}):`, raw);
       return sanitizeAiPayload(JSON.parse(raw), sessionData, currentIdx);
     } catch (err) {
       console.error(`Gemini attempt ${attempt} failed:`, err);
@@ -904,10 +925,13 @@ async function persistInboundMedia(sessionData, incomingMedia) {
         ownerId: sessionData.userId,
         receivedAt: new Date().toISOString()
       });
+      console.log(`[Shadchan] Stored media key=${key} contentType=${contentType} label=${stored[stored.length - 1].label} bytes=${buffer.length}`);
     } catch (err) {
       console.error("persistInboundMedia failed:", err);
     }
   }
+
+  console.log(`[Shadchan] persistInboundMedia: ${stored.length}/${incomingMedia.length} item(s) stored for user ${sessionData.userId}`);
 
   if (stored.length) {
     await db.collection("users").doc(sessionData.userId).set(
@@ -950,6 +974,7 @@ async function sendWithAttachments(toPhone, text, mediaItems = []) {
     if (isImage && m.bytes <= MMS_SAFE_BYTES) asMms.push(m.url);
     else asLink.push(m.url);
   }
+  console.log(`[Shadchan] sendWithAttachments to ${toPhone}: ${asMms.length} as MMS, ${asLink.length} as link`, mediaItems.map(m => ({ key: m.key, contentType: m.contentType, bytes: m.bytes })));
 
   const body = asLink.length ? `${text}\n\n${asLink.join("\n")}` : text;
   return await sendTelnyxMessage(toPhone, body, asMms);
