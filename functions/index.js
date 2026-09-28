@@ -8,6 +8,15 @@ const admin = require("firebase-admin");
 const { getStorage } = require("firebase-admin/storage");
 const crypto = require("crypto");
 
+// Only formats Gemini can actually read as inline file data. Anything else — a resume .docx
+// being the common case — either gets rejected outright or comes through as unreadable binary,
+// and either way the model has nothing real to react to. Those get described in plain text
+// instead of attempted as inlineData.
+const GEMINI_INLINEABLE_TYPES = [
+  "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif",
+  "application/pdf"
+];
+
 const MMS_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"];
 const MMS_SAFE_BYTES = 600 * 1024;
 
@@ -641,8 +650,9 @@ ${current ? `${current.name} (id ${current.candidateId}). ${current.notes || ""}
 They are candidate ${currentIdx + 1} of ${pipeline.length}. Do not mention anyone further down the list until this one is settled.
 
 ${pending ? `WAITING ON ${firstName}
-${pending.fromName} asked: "${pending.question}". You already passed this along. When ${firstName} answers, set action to "answer_partner" and put their answer, in their voice, in crossSessionMessage.` : ""}
-
+${pending.fromName} asked: "${pending.question}". You already passed this along.
+- If ${firstName} replies with words, that's the answer — action "answer_partner", their answer in their voice in crossSessionMessage.
+- If ${firstName} replies by sending a file (a resume, a photo, anything) — even with no caption at all — that IS them answering. Action "forward_media" with that file's key. crossSessionMessage can be a short line like "here's the resume" or left out entirely — don't wait for them to also type something first.` : ""}
 FILES ${firstName} HAS SENT YOU (you may pass these along by key)
 ${ownMedia.length ? JSON.stringify(ownMedia.map(m => ({ key: m.key, type: m.contentType, label: m.label || "" }))) : "None yet."}
 
@@ -672,7 +682,16 @@ WHAT TO DO
 
   for (let i = 0; i < recent.length; i++) {
     const m = recent[i];
-    const text = m.text || (m.media?.length ? "(sent an attachment)" : "");
+    let text = m.text || "";
+    if (!text && m.media?.length) {
+      // Describe what arrived even for formats we can't show the model directly, so an
+      // unreadable file (a .docx resume, say) never reads as "nothing was sent."
+      text = m.media
+        .map(item => GEMINI_INLINEABLE_TYPES.includes((item.contentType || "").toLowerCase())
+          ? "(sent an attachment)"
+          : `(sent a file — ${item.label || "document"})`)
+        .join(" ");
+    }
     if (!text) continue; // Gemini rejects a part with no content at all
 
     // System notes (cross-session questions/answers) are the shadchan's own words, not the
@@ -693,24 +712,25 @@ WHAT TO DO
     contents.push({ role: "user", parts: [{ text: lastText }] });
   }
 
-  // Inline every not-yet-answered attachment — the whole current burst, not just this one
-  // call's — so a photo or PDF sent a message earlier is something the model can actually see.
-  // Capped so a burst of several large files can't blow past the request size limit and fail
-  // the whole call — anything past the cap just stays a text placeholder instead.
+  // Inline every not-yet-answered attachment Gemini can actually read — the whole current
+  // burst, not just this one call's — so a photo or PDF sent a message earlier is something
+  // the model can actually see. Anything not in GEMINI_INLINEABLE_TYPES was already described
+  // in text above instead of attempted here. Capped so several large files in one burst can't
+  // blow past the request size limit — anything past the cap just stays a text placeholder.
   const MAX_INLINE_BYTES = 15 * 1024 * 1024;
   let inlinedBytes = 0;
 
   outer:
   for (const task of mediaTasks) {
     for (const m of task.mediaItems) {
+      if (!GEMINI_INLINEABLE_TYPES.includes((m.contentType || "").toLowerCase())) continue;
       if (inlinedBytes >= MAX_INLINE_BYTES) break outer;
       try {
         const r = await fetch(m.url);
         const buf = Buffer.from(await r.arrayBuffer());
         if (inlinedBytes + buf.length > MAX_INLINE_BYTES) continue; // would push us over — skip, keep the placeholder
         inlinedBytes += buf.length;
-        const mimeType = m.contentType === "application/pdf" ? "application/pdf" : (m.contentType || "image/jpeg");
-        task.entry.parts.push({ inlineData: { data: buf.toString("base64"), mimeType } });
+        task.entry.parts.push({ inlineData: { data: buf.toString("base64"), mimeType: m.contentType } });
       } catch (err) {
         console.error("inline media fetch failed:", err);
       }
@@ -880,7 +900,7 @@ async function persistInboundMedia(sessionData, incomingMedia) {
         storagePath: path,
         contentType,
         bytes: buffer.length,
-        label: contentType === "application/pdf" ? "document" : "photo",
+        label: MMS_IMAGE_TYPES.includes(contentType) ? "photo" : "document",
         ownerId: sessionData.userId,
         receivedAt: new Date().toISOString()
       });
