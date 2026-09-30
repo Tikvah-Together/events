@@ -34,7 +34,9 @@ const telnyxPhoneNumber = defineSecret('TELNYX_PHONE_NUMBER');
 
 // Initialize Firebase Admin if it hasn't been initialized yet
 if (admin.apps.length === 0) {
-  admin.initializeApp();
+  admin.initializeApp({
+    storageBucket: "ttevents-81927.firebasestorage.app"
+  });
 }
 
 const db = admin.firestore();
@@ -335,6 +337,7 @@ exports.handleIncomingTelnyx = onRequest(
         text: incomingText,
         media: storedMedia,
         mediaUrls: storedMedia.map(m => m.url),
+        failedMediaCount: incomingMedia.length - storedMedia.length,
         timestamp: new Date().toISOString()
       });
 
@@ -455,7 +458,7 @@ async function processClaimedTurn(ref, sessionData) {
     if (ai.action === "ask_partner" && sessionData.pendingInboundQuestion) {
       const owed = sessionData.pendingInboundQuestion;
       ai.action = "continue";
-      ai.replyText = `Before that — what do you think about what ${owed.fromName} asked? ${owed.question}`;
+      ai.replyText = `Before that, what do you think about what ${owed.fromName} asked? ${owed.question}`;
     }
 
     if (ai.action === "ask_partner" && ai.crossSessionMessage) {
@@ -478,7 +481,7 @@ async function processClaimedTurn(ref, sessionData) {
           [msg("ai", ai.replyText)]);
         await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
 
-        const note = `Quick one from ${firstName} — ${ai.crossSessionMessage}`;
+        const note = `${ai.crossSessionMessage}`;
         await commitCrossSession(partnerRef, {
           status: "active",
           pendingInboundQuestion: {
@@ -492,8 +495,7 @@ async function processClaimedTurn(ref, sessionData) {
         const partnerSendResult = await sendWithAttachments(p.userPhoneNumber, note, attachments);
         console.log(`[Shadchan] Partner send result:`, partnerSendResult);
         await markIfBlocked(partnerRef, partnerSendResult);
-    }
-
+      }
     } else if (ai.action === "answer_partner" || ai.action === "forward_media") {
       const targetId = sessionData.pendingInboundQuestion?.fromUserId
         || sessionData.candidatePipeline?.[curIdx]?.candidateId;
@@ -707,6 +709,10 @@ WHAT TO DO
           : `(sent a file — ${item.label || "document"})`)
         .join(" ");
       console.log(`[Shadchan] Message ${i} media placeholder: "${text}" (types: ${m.media.map(x => x.contentType).join(", ")})`);
+    } else if (!text && m.failedMediaCount) {
+      // Storage failed to save it — tell the model honestly instead of letting the message
+      // vanish and having it confidently claim nothing was ever sent.
+      text = "(tried to send a file, but it didn't come through on our end)";
     }
     if (!text) continue; // Gemini rejects a part with no content at all
 
