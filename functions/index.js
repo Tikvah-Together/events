@@ -970,6 +970,20 @@ function collectBurstMedia(messages = []) {
   return collected;
 }
 
+// Shortens a link via TinyURL's free API before it goes out in a text. Falls back to the
+// original URL on any failure — a long link beats no link.
+async function shortenUrl(longUrl) {
+  try {
+    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`);
+    if (!res.ok) return longUrl;
+    const short = (await res.text()).trim();
+    return short.startsWith("http") ? short : longUrl;
+  } catch (err) {
+    console.error("[Shadchan] URL shortening failed:", err);
+    return longUrl;
+  }
+}
+
 // Images go as MMS; PDFs and anything oversized go as a bare link in the body.
 async function sendWithAttachments(toPhone, text, mediaItems = []) {
   const asMms = [];
@@ -978,7 +992,7 @@ async function sendWithAttachments(toPhone, text, mediaItems = []) {
   for (const m of mediaItems) {
     const isImage = MMS_IMAGE_TYPES.includes((m.contentType || "").toLowerCase());
     if (isImage && m.bytes <= MMS_SAFE_BYTES) asMms.push(m.url);
-    else asLink.push(m.url);
+    else asLink.push(await shortenUrl(m.url));
   }
   console.log(`[Shadchan] sendWithAttachments to ${toPhone}: ${asMms.length} as MMS, ${asLink.length} as link`, mediaItems.map(m => ({ key: m.key, contentType: m.contentType, bytes: m.bytes })));
 
