@@ -42,17 +42,139 @@ if (admin.apps.length === 0) {
 const db = admin.firestore();
 const GEMINI_MODEL = "gemini-3.1-flash-lite";
 const MAX_HISTORY = 24;
+const SHADCHAN_TZ = "America/New_York"; // "tomorrow" and "Sunday" get measured in this timezone
+
+function nowForPrompt() {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: SHADCHAN_TZ, weekday: "long", month: "long", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit"
+  }).format(new Date());
+}
+
+// A small calendar so "Sunday" or "next Thursday" resolves to a real date without guesswork.
+function upcomingDaysForPrompt(days = 14) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: SHADCHAN_TZ, year: "numeric", month: "numeric", day: "numeric"
+  }).formatToParts(new Date());
+  const num = (type) => Number(parts.find(p => p.type === type).value);
+  const y = num("year"), m = num("month"), d = num("day");
+
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" });
+  const out = [];
+  for (let i = 0; i < days; i++) {
+    let label = fmt.format(new Date(Date.UTC(y, m - 1, d + i, 12)));
+    if (i === 0) label += " (today)";
+    if (i === 1) label += " (tomorrow)";
+    out.push(label);
+  }
+  return out.join("; ");
+}
+
+// "2026-11-08 20:00" typed in New York time -> the real moment it refers to (handles DST).
+function nyLocalToDate(str) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})/.exec(String(str || "").trim());
+  if (!m) return null;
+  const [y, mo, d, h, mi] = m.slice(1).map(Number);
+  const asUTC = Date.UTC(y, mo - 1, d, h, mi);
+  const offsetAt = (ms) => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: SHADCHAN_TZ, hourCycle: "h23",
+      year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric"
+    }).formatToParts(new Date(ms));
+    const g = (t) => Number(parts.find(p => p.type === t).value);
+    return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute")) - ms;
+  };
+  let guess = asUTC - offsetAt(asUTC);
+  guess = asUTC - offsetAt(guess);
+  const out = new Date(guess);
+  return isNaN(out.getTime()) ? null : out;
+}
+
+// Simple fallback only, used if the Hebrew calendar library can't load: never Saturday, Friday morning only.
+function okToTextNowSimple(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: SHADCHAN_TZ, weekday: "short", hourCycle: "h23", hour: "numeric"
+  }).formatToParts(now);
+  const day = parts.find(p => p.type === "weekday").value;
+  const hour = Number(parts.find(p => p.type === "hour").value);
+  if (day === "Sat") return false;
+  if (day === "Fri") return hour >= 10 && hour < 13;
+  return hour >= 10 && hour < 20;
+}
+
+// Shabbat and Yom Tov, worked out from the real Hebrew calendar for New York (Hebcal's open-source
+// library, runs inside the function, so there's no web call that could fail). Candle lighting
+// starts the rest, Havdalah ends it; back-to-back days (Yom Tov into Shabbat) stay blocked
+// throughout because no Havdalah falls between them.
+let hebcalPromise = null;
+function loadHebcal() {
+  if (!hebcalPromise) hebcalPromise = import("@hebcal/core").catch(err => { hebcalPromise = null; throw err; });
+  return hebcalPromise;
+}
+const restCache = new Map(); // "YYYY-MM-DD" (NY day) -> [{ t: ms, start: bool }]
+async function restEventsAround(now) {
+  const key = new Intl.DateTimeFormat("en-CA", { timeZone: SHADCHAN_TZ }).format(now);
+  if (restCache.has(key)) return restCache.get(key);
+  const { HebrewCalendar, Location, flags } = await loadHebcal();
+  const loc = Location.lookup("New York");
+  const raw = HebrewCalendar.calendar({
+    start: new Date(now.getTime() - 5 * 86400000),
+    end: new Date(now.getTime() + 5 * 86400000),
+    location: loc, candlelighting: true, sedrot: false,
+    candleLightingMins: -18, havdalahMins: 50
+  });
+  const list = [];
+  for (const e of raw) {
+    if (!e.eventTime) continue;
+    if (e.getFlags() & flags.LIGHT_CANDLES) list.push({ t: e.eventTime.getTime(), start: true });
+    else if (/^Havdalah/i.test(e.getDesc())) list.push({ t: e.eventTime.getTime(), start: false });
+  }
+  list.sort((a, b) => a.t - b.t);
+  if (restCache.size > 5) restCache.clear();
+  restCache.set(key, list);
+  return list;
+}
+
+// True when it's a sensible moment to send an unprompted text. 10am-8pm New York, and never from
+// an hour before candle lighting until after Havdalah (Shabbos and every Yom Tov day).
+async function isSafeToText(now = new Date()) {
+  try {
+    const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: SHADCHAN_TZ, hourCycle: "h23", hour: "numeric" }).format(now));
+    if (hour < 10 || hour >= 20) return false;
+    const events = await restEventsAround(now);
+    const t = now.getTime();
+    const HOUR = 3600000;
+    // Inside the rest: the last event at or before now was a candle lighting.
+    let last = null;
+    for (const e of events) if (e.t <= t) last = e;
+    if (last && last.start) return false;
+    // The hour before candle lighting, too.
+    const next = events.find(e => e.t > t);
+    if (next && next.start && next.t - t < HOUR) return false;
+    return true;
+  } catch (err) {
+    console.error("[Shadchan] Hebrew calendar unavailable, using the simple Shabbos rule:", err);
+    return okToTextNowSimple(now);
+  }
+}
+
+const SHADCHAN_ACTIONS = ["continue", "ask_partner", "answer_partner", "tell_partner", "forward_media", "no_reply"];
+
 const SHADCHAN_SCHEMA = {
   type: Type.OBJECT,
   properties: {
     replyText:             { type: Type.STRING },
-    action:                { type: Type.STRING, enum: ["continue", "ask_partner", "answer_partner", "forward_media"] },
+    action:                { type: Type.STRING, enum: SHADCHAN_ACTIONS },
     nextIndex:             { type: Type.INTEGER },
     matchConfirmed:        { type: Type.BOOLEAN },
     confirmedCandidateId:  { type: Type.STRING },
     closeSession:          { type: Type.BOOLEAN },
     crossSessionMessage:   { type: Type.STRING },
-    mediaKeys:             { type: Type.ARRAY, items: { type: Type.STRING } }
+    mediaKeys:             { type: Type.ARRAY, items: { type: Type.STRING } },
+    agreedTime:            { type: Type.STRING },
+    address:               { type: Type.STRING },
+    dateLocal:             { type: Type.STRING },
+    dateOutcome:           { type: Type.STRING, enum: ["none", "didnt_happen", "went_not_match", "went_continue"] }
   },
   required: ["replyText", "action", "nextIndex", "matchConfirmed", "closeSession"]
 };
@@ -70,6 +192,8 @@ exports.autoCompleteEventsAndRunAI = onSchedule({
   timeoutSeconds: 540,
   secrets: [geminiApiKey, telnyxApiKey, telnyxPhoneNumber]
 }, async (event) => {
+  // Opening texts go out at the first safe moment. Nothing is marked done until then.
+  if (!(await isSafeToText())) { console.log("Not a good time to text (night, Shabbos or Yom Tov). Will retry next hour."); return; }
   const now = admin.firestore.Timestamp.now();
   const eventsRef = db.collection("events");
 
@@ -414,12 +538,17 @@ async function processClaimedTurn(ref, sessionData) {
 
     const ownMedia = await resolveOwnMedia(sessionData.userId);
     const ai = await generateAiResponseWithState(sessionData, ownMedia);
-    console.log(`[Shadchan] AI decision for ${sessionData.userId}: action=${ai.action} mediaKeys=${JSON.stringify(ai.mediaKeys)} crossSessionMessage=${ai.crossSessionMessage ? JSON.stringify(ai.crossSessionMessage) : "(none)"}`);
+    console.log(`[Shadchan] AI decision for ${sessionData.userId}: action=${ai.action} agreedTime=${ai.agreedTime || "(none)"} address=${ai.address ? "(given)" : "(none)"} mediaKeys=${JSON.stringify(ai.mediaKeys)} crossSessionMessage=${ai.crossSessionMessage ? JSON.stringify(ai.crossSessionMessage) : "(none)"}`);
 
     const firstName = (sessionData.userName || "").split(" ")[0];
     const stamp = () => new Date().toISOString();
     const msg = (sender, text) => ({ sender, text, timestamp: stamp() });
     const curIdx = sessionData.currentPipelineIndex || 0;
+
+    const candidateId = sessionData.candidatePipeline?.[curIdx]?.candidateId;
+    // Whoever asked us something is who we answer; otherwise it's the person we're matched with.
+    const counterpartId = sessionData.pendingInboundQuestion?.fromUserId || candidateId;
+    const sessionRefFor = (userId) => db.collection("aiMatchmakerSessions").doc(`${sessionData.eventId}_${userId}`);
 
     // Reuse the media we already loaded, matched by the key the model gave us.
     let attachments = ai.mediaKeys.length ? ownMedia.filter(m => ai.mediaKeys.includes(m.key)) : [];
@@ -427,21 +556,47 @@ async function processClaimedTurn(ref, sessionData) {
       console.warn("Model asked to forward keys that don't exist:", ai.mediaKeys, "available keys:", ownMedia.map(m => m.key));
     }
     // If we're meant to be sending something but couldn't resolve which file from the model's
-    // keys, fall back to whatever was actually just sent. This is the bug that was silently
-    // swallowing resumes: forward_media used to get downgraded to a plain reply the instant the
-    // model's key didn't match exactly, so the file never went anywhere even though the person
-    // got told it had been.
+    // keys, fall back to whatever was actually just sent.
     if ((ai.action === "forward_media" || ai.action === "answer_partner") && !attachments.length) {
       attachments = collectBurstMedia(sessionData.messages);
       console.log(`[Shadchan] Fell back to collectBurstMedia: found ${attachments.length} item(s)`, attachments.map(a => a.key));
     }
     console.log(`[Shadchan] Final attachments to forward: ${attachments.length}`, attachments.map(a => ({ key: a.key, contentType: a.contentType })));
 
+    // Safety nets for when the model's output and its action don't line up.
+    // An address was given but the model forgot to pass it on, so pass it on.
+    if (ai.address && ai.action === "continue") {
+      ai.action = "tell_partner";
+      ai.crossSessionMessage = ai.crossSessionMessage || `Address: ${ai.address}`;
+    }
+    // Nothing to deliver means there's nothing to relay.
+    if (ai.action === "tell_partner" && !ai.crossSessionMessage) ai.action = "continue";
+    if ((ai.action === "answer_partner" || ai.action === "forward_media") && !ai.crossSessionMessage && !attachments.length) {
+      ai.action = "continue";
+    }
+
     // Applies on every path, not just "continue".
+    // no_reply is only honored for a short, plain acknowledgment once a date is set. Anything
+    // else gets the reply the model wrote, so a real question is never met with silence.
+    let staySilent = false;
+    if (ai.action === "no_reply") {
+      const lastUser = [...sessionData.messages].reverse().find(m => m.sender === "user");
+      const t = (lastUser?.text || "").trim();
+      staySilent = !!sessionData.dateDetails?.time && t.length > 0 && t.length <= 30 && !t.includes("?") && !lastUser?.media?.length;
+      ai.action = "continue";
+    }
+
+    const dd = sessionData.dateDetails || {};
     const basePatch = {
       currentPipelineIndex: ai.nextIndex,
       status: ai.closeSession ? "completed" : "active"
     };
+    // Not a match: this thread is done.
+    if (dd.followUpSent && ai.dateOutcome === "went_not_match") basePatch.status = "completed";
+    // Didn't happen: wipe the old plan so the time-setting steps start fresh.
+    if (dd.followUpSent && ai.dateOutcome === "didnt_happen") basePatch.dateDetails = admin.firestore.FieldValue.delete();
+    // Moving on to someone new: what was settled with the last person doesn't carry over.
+    if (ai.nextIndex > curIdx) basePatch.dateDetails = admin.firestore.FieldValue.delete();
 
     if (ai.matchConfirmed && ai.confirmedCandidateId) {
       await recordConversationalMatch(sessionData.eventId, sessionData.userId, ai.confirmedCandidateId);
@@ -453,35 +608,83 @@ async function processClaimedTurn(ref, sessionData) {
       if (passedId) await recordPass(sessionData.eventId, sessionData.userId, passedId);
     }
 
+    // Remember what's been settled on BOTH sides, so neither session loses track of it.
+    const dateFields = {};
+    if (ai.agreedTime) dateFields["dateDetails.time"] = ai.agreedTime;
+    if (ai.address) dateFields["dateDetails.address"] = ai.address;
+    if (ai.dateLocal) {
+      const when = nyLocalToDate(ai.dateLocal);
+      const now = Date.now();
+      if (when && when.getTime() > now && when.getTime() < now + 60 * 24 * 60 * 60 * 1000) {
+        dateFields["dateDetails.at"] = admin.firestore.Timestamp.fromDate(when);
+        dateFields["dateDetails.followUpAt"] = admin.firestore.Timestamp.fromMillis(when.getTime() + 24 * 60 * 60 * 1000);
+        dateFields["dateDetails.followUpSent"] = false;
+        console.log(`[Shadchan] Date set for ${when.toISOString()}; follow-up due ${new Date(when.getTime() + 86400000).toISOString()}`);
+      } else {
+        console.warn(`[Shadchan] Ignoring unusable dateLocal "${ai.dateLocal}"`);
+      }
+    }
+    if (Object.keys(dateFields).length) {
+      await ref.update(dateFields).catch(err => console.error("[Shadchan] dateDetails save failed:", err));
+      if (counterpartId) await sessionRefFor(counterpartId).update(dateFields).catch(() => {});
+    }
+
+    // Tell the other session how the date went, and reset both sides if it never happened.
+    if (dd.followUpSent && ai.dateOutcome !== "none") {
+      console.log(`[Shadchan] Date outcome from ${sessionData.userId}: ${ai.dateOutcome}`);
+      await ref.update({ "dateDetails.outcome": ai.dateOutcome }).catch(() => {});
+      if (counterpartId) {
+        if (ai.dateOutcome === "didnt_happen") {
+          await sessionRefFor(counterpartId).update({ dateDetails: admin.firestore.FieldValue.delete() }).catch(() => {});
+        } else {
+          await sessionRefFor(counterpartId).update({ "dateDetails.otherOutcome": ai.dateOutcome }).catch(() => {});
+        }
+      }
+      if (ai.dateOutcome === "went_not_match" && candidateId) {
+        await recordPass(sessionData.eventId, sessionData.userId, candidateId);
+        // Let the other side know, kindly, at the next safe moment (followUpAfterDates delivers it).
+        // Skip if they've already told us how it went, or already heard.
+        try {
+          const cSnap = await sessionRefFor(counterpartId || candidateId).get();
+          const c = cSnap.exists ? cSnap.data() : null;
+          const cdd = c?.dateDetails || {};
+          const alreadyKnows = !c || cdd.outcome || cdd.noticeSent || cdd.noticeDue || cdd.otherOutcome === "went_not_match" || c.status === "opted_out";
+          if (!alreadyKnows) {
+            const myFirst = (sessionData.userName || "").split(" ")[0] || "them";
+            const theirFirst = (c.userName || "").split(" ")[0] || "there";
+            await recordPass(sessionData.eventId, c.userId || (counterpartId || candidateId), sessionData.userId);
+            await cSnap.ref.update({
+              "dateDetails.noticeDue": true,
+              "dateDetails.noticeText": `Hi ${theirFirst}, I checked in with ${myFirst} and it sounds like it wasn't the right fit this time. Thank you for giving it a try.`
+            });
+          }
+        } catch (err) {
+          console.error("[Shadchan] Could not queue the not-a-match notice:", err);
+        }
+      }
+    }
+
     // If WE still owe someone an answer, don't let a new question jump the queue —
     // that's exactly how both threads end up paused waiting on each other.
     if (ai.action === "ask_partner" && sessionData.pendingInboundQuestion) {
-      const owed = sessionData.pendingInboundQuestion;
       ai.action = "continue";
-      ai.replyText = `Before that, what do you think about what ${owed.fromName} asked? ${owed.question}`;
+      ai.replyText = "Can you answer that last question first?";
     }
 
     if (ai.action === "ask_partner" && ai.crossSessionMessage) {
-      const partnerId = sessionData.candidatePipeline?.[curIdx]?.candidateId;
-      const partnerRef = partnerId
-        ? db.collection("aiMatchmakerSessions").doc(`${sessionData.eventId}_${partnerId}`)
-        : null;
+      const partnerRef = candidateId ? sessionRefFor(candidateId) : null;
       const partnerSnap = partnerRef ? await partnerRef.get() : null;
       const p = partnerSnap?.exists ? partnerSnap.data() : null;
 
       if (!p) {
-        const fallback = "I can't get hold of them at the moment. Want to sit tight, or should I move on to the next one?";
-        await commitTurn(ref, { ...basePatch, status: "active" },
-          [msg("ai", ai.replyText), msg("ai", fallback)]);
-        await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
+        const fallback = "Can't reach them right now. Wait, or move on to the next one?";
+        await commitTurn(ref, { ...basePatch, status: "active" }, [msg("ai", fallback)]);
         await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, fallback));
 
       } else {
-        await commitTurn(ref, { ...basePatch, status: "paused_waiting_on_partner" },
-          [msg("ai", ai.replyText)]);
+        await commitTurn(ref, { ...basePatch, status: "paused_waiting_on_partner" }, [msg("ai", ai.replyText)]);
         await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
 
-        const note = `${ai.crossSessionMessage}`;
         await commitCrossSession(partnerRef, {
           status: "active",
           pendingInboundQuestion: {
@@ -490,24 +693,20 @@ async function processClaimedTurn(ref, sessionData) {
             question: ai.crossSessionMessage,
             askedAt: stamp()
           }
-        }, [msg("system", note)]);
-        console.log(`[Shadchan] Delivering to partner ${p.userPhoneNumber}: note="${note}" attachments=${attachments.length}`);
-        const partnerSendResult = await sendWithAttachments(p.userPhoneNumber, note, attachments);
+        }, [msg("system", ai.crossSessionMessage)]);
+        console.log(`[Shadchan] Delivering to partner ${p.userPhoneNumber}: note="${ai.crossSessionMessage}" attachments=${attachments.length}`);
+        const partnerSendResult = await sendWithAttachments(p.userPhoneNumber, ai.crossSessionMessage, attachments);
         console.log(`[Shadchan] Partner send result:`, partnerSendResult);
         await markIfBlocked(partnerRef, partnerSendResult);
       }
-    } else if (ai.action === "answer_partner" || ai.action === "forward_media") {
-      const targetId = sessionData.pendingInboundQuestion?.fromUserId
-        || sessionData.candidatePipeline?.[curIdx]?.candidateId;
 
+    } else if (ai.action === "answer_partner" || ai.action === "forward_media") {
+      const note = ai.crossSessionMessage || "Here you go.";
       let delivered = false;
-      if (targetId) {
-        const askerRef = db.collection("aiMatchmakerSessions").doc(`${sessionData.eventId}_${targetId}`);
+      if (counterpartId) {
+        const askerRef = sessionRefFor(counterpartId);
         const askerSnap = await askerRef.get();
         if (askerSnap.exists) {
-          const note = ai.crossSessionMessage
-            ? `Heard back from ${firstName} — ${ai.crossSessionMessage}`
-            : `${firstName} asked me to send this over.`;
           await commitCrossSession(askerRef, { status: "active" }, [msg("system", note)]);
           console.log(`[Shadchan] Delivering to asker ${askerSnap.data().userPhoneNumber}: note="${note}" attachments=${attachments.length}`);
           const askerSendResult = await sendWithAttachments(askerSnap.data().userPhoneNumber, note, attachments);
@@ -516,13 +715,45 @@ async function processClaimedTurn(ref, sessionData) {
           delivered = true;
         }
       }
-      if (!delivered) console.warn(`Undeliverable cross-session message; targetId=${targetId}`);
+      if (!delivered) {
+        console.warn(`Undeliverable cross-session message; counterpartId=${counterpartId}`);
+        ai.replyText = "Couldn't reach them just now. Can you text me again in a bit?";
+      }
 
       await commitTurn(ref, {
         ...basePatch,
         pendingInboundQuestion: admin.firestore.FieldValue.delete()
       }, [msg("ai", ai.replyText)]);
       await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
+
+    } else if (ai.action === "tell_partner") {
+      // Something the other side should hear that needs no reply (her address, mostly).
+      // No pending question and no pause on either side, so nobody ends up waiting.
+      let delivered = false;
+      if (counterpartId) {
+        const otherRef = sessionRefFor(counterpartId);
+        const otherSnap = await otherRef.get();
+        if (otherSnap.exists) {
+          await commitCrossSession(otherRef, { status: "active" }, [msg("system", ai.crossSessionMessage)]);
+          console.log(`[Shadchan] Telling ${otherSnap.data().userPhoneNumber}: note="${ai.crossSessionMessage}" attachments=${attachments.length}`);
+          const tellResult = await sendWithAttachments(otherSnap.data().userPhoneNumber, ai.crossSessionMessage, attachments);
+          console.log(`[Shadchan] Tell send result:`, tellResult);
+          await markIfBlocked(otherRef, tellResult);
+          delivered = true;
+        }
+      }
+      if (!delivered) {
+        console.warn(`Undeliverable tell_partner; counterpartId=${counterpartId}`);
+        ai.replyText = "Couldn't reach them just now. Can you text me again in a bit?";
+      }
+
+      await commitTurn(ref, { ...basePatch, pendingInboundQuestion: admin.firestore.FieldValue.delete() }, [msg("ai", ai.replyText)]);
+      await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
+
+    } else if (staySilent) {
+      // A blank "ai" entry marks the message as handled, so the retry sweep doesn't try again.
+      console.log(`[Shadchan] Staying quiet for ${sessionData.userId}: plain acknowledgment after the date was set`);
+      await commitTurn(ref, basePatch, [{ sender: "ai", text: "", silent: true, timestamp: stamp() }]);
 
     } else {
       await commitTurn(ref, basePatch, [msg("ai", ai.replyText)]);
@@ -531,15 +762,95 @@ async function processClaimedTurn(ref, sessionData) {
   } catch (err) {
     console.error("processClaimedTurn failed:", err);
     await ref.update({ processingUntil: null }).catch(() => {});
-    await sendTelnyxMessage(sessionData.userPhoneNumber, "Sorry, give me a minute and text me again. Something's being slow on my end.").catch(() => {});
+    await sendTelnyxMessage(sessionData.userPhoneNumber, "Sorry, can you text me that again in a minute?").catch(() => {});
   }
 }
 
+// The morning after a date: ask each side how it went. Runs hourly, but only texts in a
+// sensible window (Sun-Thu daytime, Friday morning). Never Friday afternoon or Saturday.
+exports.followUpAfterDates = onSchedule({
+  schedule: "every 1 hours",
+  timeoutSeconds: 300,
+  secrets: [telnyxApiKey, telnyxPhoneNumber]
+}, async (event) => {
+  if (!(await isSafeToText())) return;
+
+  const nowTs = admin.firestore.Timestamp.now();
+
+  // 1) Deliver queued "it wasn't a match" notices first.
+  const noticeSnap = await db.collection("aiMatchmakerSessions").where("dateDetails.noticeDue", "==", true).get();
+  for (const doc of noticeSnap.docs) {
+    const d = doc.data();
+    const dd0 = d.dateDetails || {};
+    try {
+      if (d.status === "opted_out" || dd0.outcome || !dd0.noticeText) {
+        await doc.ref.update({ "dateDetails.noticeDue": false }).catch(() => {});
+        continue;
+      }
+      // Mark first so an overlapping run can't send it twice. The notice stands in for the "how did it go" check-in.
+      await commitCrossSession(doc.ref, {
+        status: "active",
+        "dateDetails.noticeDue": false,
+        "dateDetails.noticeSent": true,
+        "dateDetails.followUpSent": true
+      }, [{ sender: "ai", text: dd0.noticeText, timestamp: new Date().toISOString() }]);
+      const result = await sendTelnyxMessage(d.userPhoneNumber, dd0.noticeText);
+      if (result?.blocked) await doc.ref.update({ status: "opted_out" }).catch(() => {});
+      console.log(`[Shadchan] Not-a-match notice sent to ${doc.id}:`, result);
+    } catch (err) {
+      console.error(`Notice failed for ${doc.id}:`, err);
+    }
+  }
+
+  // 2) The day-after check-ins.
+  const snapshot = await db.collection("aiMatchmakerSessions")
+    .where("dateDetails.followUpAt", "<=", nowTs)
+    .get();
+  if (snapshot.empty) return;
+
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  let sent = 0;
+
+  for (const doc of snapshot.docs) {
+    const d = doc.data();
+    const dd = d.dateDetails || {};
+    if (dd.followUpSent || dd.noticeDue || d.status === "opted_out") continue;
+    // Too late to ask casually. Mark it handled instead of texting about an old date.
+    if (nowTs.toMillis() - dd.followUpAt.toMillis() > WEEK_MS) {
+      await doc.ref.update({ "dateDetails.followUpSent": true }).catch(() => {});
+      continue;
+    }
+
+    const first = (d.userName || "").split(" ")[0] || "there";
+    const otherFirst = ((d.candidatePipeline?.[d.currentPipelineIndex]?.name) || "").split(" ")[0] || "them";
+    const options = [
+      `Hi ${first}, how did it go with ${otherFirst}?`,
+      `Hey ${first}, how'd it go with ${otherFirst}?`,
+      `Hi ${first}! How was it with ${otherFirst}?`
+    ];
+    const text = options[Math.floor(Math.random() * options.length)];
+
+    try {
+      // Mark first, so an overlapping run can't text the same person twice.
+      await commitCrossSession(doc.ref, { status: "active", "dateDetails.followUpSent": true },
+        [{ sender: "ai", text, timestamp: new Date().toISOString() }]);
+      const result = await sendTelnyxMessage(d.userPhoneNumber, text);
+      if (result?.blocked) await doc.ref.update({ status: "opted_out" }).catch(() => {});
+      console.log(`[Shadchan] Follow-up sent to ${doc.id}:`, result);
+      sent++;
+    } catch (err) {
+      console.error(`Follow-up failed for ${doc.id}:`, err);
+    }
+  }
+  console.log(`[Shadchan] Sent ${sent} post-date follow-up(s).`);
+});
+
 exports.sweepStalledSessions = onSchedule({
-  schedule: "every 6 hours",
+  schedule: "every 1 hours",
   timeoutSeconds: 120,
   secrets: [telnyxApiKey, telnyxPhoneNumber]
 }, async (event) => {
+  if (!(await isSafeToText())) return;
   const waitThresholdMs = 72 * 60 * 60 * 1000; // 72 hours timeout
   const nowMs = Date.now();
 
@@ -622,15 +933,19 @@ function sanitizeAiPayload(p, sessionData, currentIdx) {
   const reply = humanize(p.replyText);
 
   return {
-    replyText: reply || "Sorry, my phone glitched — can you send that again?",
-    action: ["continue", "ask_partner", "answer_partner", "forward_media"].includes(p.action) ? p.action : "continue",
+    replyText: reply || "Sorry, can you resend that?",
+    action: SHADCHAN_ACTIONS.includes(p.action) ? p.action : "continue",
     nextIndex,
     matchConfirmed: p.matchConfirmed === true,
     confirmedCandidateId: p.confirmedCandidateId || sessionData.candidatePipeline?.[currentIdx]?.candidateId || "",
     // Only truly done when we've actually exhausted the pipeline.
     closeSession: p.closeSession === true && nextIndex >= len,
     crossSessionMessage: humanize(p.crossSessionMessage || ""),
-    mediaKeys: Array.isArray(p.mediaKeys) ? p.mediaKeys : []
+    mediaKeys: Array.isArray(p.mediaKeys) ? p.mediaKeys : [],
+    agreedTime: humanize(p.agreedTime || ""),
+    address: String(p.address || "").trim(),
+    dateLocal: String(p.dateLocal || "").trim(),
+    dateOutcome: ["didnt_happen", "went_not_match", "went_continue"].includes(p.dateOutcome) ? p.dateOutcome : "none"
   };
 }
 
@@ -638,8 +953,10 @@ async function generateAiResponseWithState(sessionData, ownMedia = []) {
   const currentIdx = Math.min(sessionData.currentPipelineIndex || 0, (sessionData.candidatePipeline || []).length);
   const pipeline = sessionData.candidatePipeline || [];
   const current = pipeline[currentIdx] || null;
+  const otherName = current ? ((current.name || "").split(" ")[0] || "the other side") : "the other side";
   const firstName = (sessionData.userName || "").split(" ")[0] || "there";
   const ai = getAiClient();
+  const dd = sessionData.dateDetails || {};
 
   const pending = sessionData.pendingInboundQuestion || null;
   if (pending) {
@@ -647,43 +964,93 @@ async function generateAiResponseWithState(sessionData, ownMedia = []) {
   }
 
   const systemInstruction = `
-You are a shadchan at SY SmartMatch. You are texting ${firstName} from your own phone.
+You are a shadchan texting ${firstName} from your own phone. To them you're a real person: warm, quick, natural.
 
-HOW YOU WRITE
-- One or two sentences. Plain, warm, unhurried. Contractions. Lowercase is fine sometimes.
-- Never use brackets, asterisks, bullets, headers, numbered lists, or emoji.
-- Never narrate mechanics. Not "forwarding your question", not "processing", not "one moment while I".
-- Never call yourself a system, a service, a bot, automated, a model, or an AI. Never apologize on behalf of a platform.
-- Don't repeat their name in every message. Once at the start of a thread is plenty.
-- Don't parrot back what they just said before answering.
-- If they ask you something you don't know, say you'll find out and ask the other side. Never leave a question unanswered.
-- If they ask something off-topic, answer it briefly like a person would, then steer back.
+TODAY
+${nowForPrompt()} (New York time).
+Next two weeks: ${upcomingDaysForPrompt(14)}.
+Use this to turn "tomorrow", "Sunday" or "next Thursday" into a real date. If a day could mean two dates (like "tomorrow" late at night), check which one they mean. When you confirm a time, always say the day, date and time, never just "tomorrow" or "tonight".
 
-ABOUT ${firstName}
+HOW YOU TEXT
+- Keep it short. One sentence is normal, two short ones at most. Aim for under 15 words.
+- Talk like a friend texting. Plain words, contractions. No filler openers like "Great!", "Wonderful!" or "Glad we got that sorted".
+- No brackets, asterisks, bullets, lists or emoji. Never mention being a bot, system, service or AI.
+- Don't repeat their name or echo back what they said. Just answer.
+- Always answer what they asked. If you don't know, say you'll ask the other side and use ask_partner.
+- If they ask something off-topic, answer in a few words and steer back.
+
+Tone examples:
+"Sunday, Nov 8 at 8:00 PM works for him. What address should I send him?"
+"Sure, I'll ask him."
+"Sent it to him. Have a great time!"
+"Not sure, let me ask."
+
+YOU CAN ONLY ACT WHEN SOMEONE TEXTS YOU
+- You can't follow up later, work on logistics, set things up, or send details once they're ready. Never say you will.
+- You don't book or choose places. Your job is to get a day and time both sides agree on, then get her address to him. That's all.
+- Only say you'll check with the other side if you're using ask_partner in this same reply.
+
+ABOUT ${firstName} (the gender in this profile tells you whether ${firstName} is the woman or the man)
 ${JSON.stringify(sessionData.userProfile || {}, null, 2)}
 
 WHO YOU'RE DISCUSSING RIGHT NOW
 ${current ? `${current.name} (id ${current.candidateId}). ${current.notes || ""}` : "You've been through everyone on the list."}
 They are candidate ${currentIdx + 1} of ${pipeline.length}. Do not mention anyone further down the list until this one is settled.
 
-${pending ? `WAITING ON ${firstName}
-${pending.fromName} asked: "${pending.question}". You already passed this along.
-- If ${firstName} replies with words, that's the answer — action "answer_partner", their answer in their voice in crossSessionMessage.
-- If ${firstName} replies by sending a file (a resume, a photo, anything) — even with no caption at all — that IS them answering. Action "forward_media" with that file's key. crossSessionMessage can be a short line like "here's the resume" or left out entirely — don't wait for them to also type something first.` : ""}
-FILES ${firstName} HAS SENT YOU (you may pass these along by key)
-${ownMedia.length ? JSON.stringify(ownMedia.map(m => ({ key: m.key, type: m.contentType, label: m.label || "" }))) : "None yet."}
+${pending ? `${pending.fromName} asked ${firstName}: "${pending.question}"
+Whatever ${firstName} says back, even a counter-offer like "how about Monday?", is the answer. Use answer_partner. If ${firstName} sends a file instead, that IS the answer: use forward_media with that file's key, no words needed.` : ""}
 
-WHAT TO DO
-- Normal reply: action "continue".
-- They have a question for ${current ? current.name : "the other side"} you can't answer: action "ask_partner", put the question in crossSessionMessage. Tell ${firstName} you'll check, casually.
-- They're answering a question the other side asked: action "answer_partner", answer in crossSessionMessage.
-- They want you to send the other side a file they've already given you, or the other side asked for one and they said yes: action "forward_media" with the matching mediaKeys.
-- If they send a photo, document, or other file — even with no caption — while a resume or photo is expected, that IS the file arriving. Don't ask them to send it again: acknowledge it and use forward_media (or fold it into answer_partner) right away.
-- If the other side wants a resume or photo ${firstName} hasn't sent you, just ask for it in plain language with action "continue".
-- They're in: matchConfirmed true.
-- They pass: nextIndex ${currentIdx + 1} and introduce the next person warmly in the same message.
-- Only set closeSession true once nextIndex reaches ${pipeline.length}.
-- If they send something explicit, offensive, or not appropriate to pass along, action "continue" and tell them kindly you'd rather not send that one on.
+WHERE THE DATE STANDS
+${dd.time ? `Time agreed: ${dd.time}.` : "No time agreed yet."}
+${dd.address ? `Address: ${dd.address}.` : (dd.time ? "Address: not received yet." : "")}
+${dd.followUpSent ? `The day after the date, you already asked ${firstName} how it went.` : ""}
+${dd.otherOutcome === "went_not_match" ? `${otherName} told you they didn't feel it was a match.` : ""}
+${dd.noticeSent ? `You already told ${firstName} that ${otherName} felt it wasn't the right fit. Don't announce it again.` : ""}
+
+HOW A DATE GETS SET
+1. Help them land on one specific day and time. Pass each proposal along with ask_partner, and each answer or counter-offer with answer_partner.
+2. Once both sides have said yes to the same day and time, set agreedTime to the full day, date and time, like "Sunday, Nov 8 at 8:00 PM", and set dateLocal to that same moment as "YYYY-MM-DD HH:mm" in 24-hour New York time, like "2026-11-08 20:00". Work it out from the calendar above.
+3. Right then, get her address (or wherever she'd like to meet) to him:
+   - If ${firstName} is the woman, ask her in your reply: "What address should I send him?"
+   - If ${firstName} is the man, put the confirmed time and the address question to her in crossSessionMessage ("Sunday, Nov 8 at 8:00 PM works for him. What address should I send him?"), and tell him it's confirmed.
+4. When she gives it, use tell_partner (or answer_partner if it answers a question), put the address in crossSessionMessage, and set address. Tell her it's sent.
+5. After that you're done. A quick good-luck is enough. Promise nothing more.
+If the time is agreed and her address isn't in yet, and ${firstName} is the woman, ask for it (unless your last message already did and she hasn't answered). If ${firstName} is the man and asks, say you're waiting on her address and he'll get it as soon as she sends it.
+
+ONCE THE DATE IS SET
+- When the time is agreed and her address has been sent, you're done until the day after the date. Don't text first, check in, or remind anyone. Only reply when they text you something that needs an answer.
+- If they only acknowledge ("ok", "thanks", "great", "will do"), use no_reply. Still write the reply you would have sent in replyText. It's only a backup and won't be sent.
+
+${dd.noticeSent ? `AFTER THE NOT-A-MATCH NEWS
+${firstName} just heard it wasn't the right fit with ${otherName}. Be warm and brief. Never give a reason; you don't have one and shouldn't guess. If ${firstName} is ready for the next person, move on (nextIndex ${currentIdx + 1}) and introduce them. If they want to talk first, just talk. If they say it wasn't a match for them either, that's fine, same thing.` : ""}
+
+${dd.followUpSent && !dd.noticeSent ? `AFTER THE DATE
+You already asked ${firstName} how it went. Their answer decides what happens. Set dateOutcome once, the first time they tell you:
+- It didn't happen (cancelled, postponed, no-show): dateOutcome didnt_happen. Ask what day works to reschedule, action continue. Don't suggest a time for them. The normal time-setting steps start again from there.
+- It happened and wasn't a match: dateOutcome went_not_match. One short kind line wishing them well. Nothing more.
+- It happened and they want to keep going: dateOutcome went_continue. Ask what they liked about ${otherName} that they'd like you to pass on. When they tell you, send only what they said, in a short warm line, with tell_partner. If they'd rather not share anything, don't push.
+${dd.otherOutcome === "went_not_match" ? `- ${otherName} didn't feel it was a match. If ${firstName} wants to keep going, tell them gently and briefly. Don't pass on anything else.` : ""}
+Use dateOutcome none on every other message.` : ""}
+
+ACTIONS
+- continue: just reply to ${firstName}.
+- ask_partner: ${firstName} has a question or proposal for ${otherName}. Put it in crossSessionMessage.
+- answer_partner: ${firstName} is answering what ${otherName} asked or proposed, counter-offers included. Put the answer in crossSessionMessage.
+- tell_partner: something ${otherName} should hear that needs no answer, like her address. Put it in crossSessionMessage.
+- forward_media: pass along a file ${firstName} gave you, with its key in mediaKeys.
+- no_reply: only for a bare acknowledgment after the date is set, as described above.
+crossSessionMessage is the exact text the other person receives. Write it as a short text from you about ${firstName}, saying he or she, not their name. Example: "He says Sunday at 8 works."
+
+FILES ${firstName} HAS SENT YOU (pass along by key)
+${ownMedia.length ? JSON.stringify(ownMedia.map(m => ({ key: m.key, type: m.contentType, label: m.label || "" }))) : "None yet."}
+- A photo, document or file with no caption, when one is expected, IS the file. Don't ask again. Use forward_media (or answer_partner) right away.
+- If the other side wants a resume or photo ${firstName} hasn't sent, just ask for it in plain words, action continue.
+
+THE MATCH
+- If ${firstName} is in: matchConfirmed true.
+- If ${firstName} passes: nextIndex ${currentIdx + 1}, and introduce the next person briefly in the same message.
+- closeSession true only once nextIndex reaches ${pipeline.length}.
+- If they send something explicit or offensive, don't pass it on. Say so kindly and briefly, action continue.
 `.trim();
 
   // Only the tail of the thread — long histories are what starve the token budget.
