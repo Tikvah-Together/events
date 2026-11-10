@@ -619,6 +619,18 @@ async function processClaimedTurn(ref, sessionData) {
         dateFields["dateDetails.at"] = admin.firestore.Timestamp.fromDate(when);
         dateFields["dateDetails.followUpAt"] = admin.firestore.Timestamp.fromMillis(when.getTime() + 24 * 60 * 60 * 1000);
         dateFields["dateDetails.followUpSent"] = false;
+        // Morning-of reminder: 9am New York on the day of the date, or 3 hours before for an early date.
+        // Skipped when the date is set too late for it to make sense (the job also double-checks).
+        const nyDay = new Intl.DateTimeFormat("en-CA", { timeZone: SHADCHAN_TZ }).format(when);
+        const nineAm = nyLocalToDate(`${nyDay} 09:00`);
+        const remindAt = nineAm && nineAm.getTime() <= when.getTime() - 3 * 3600000
+          ? nineAm : new Date(when.getTime() - 3 * 3600000);
+        if (remindAt.getTime() > now) {
+          dateFields["dateDetails.reminderAt"] = admin.firestore.Timestamp.fromDate(remindAt);
+        } else {
+          dateFields["dateDetails.reminderAt"] = admin.firestore.FieldValue.delete();
+        }
+        dateFields["dateDetails.reminderSent"] = false;
         console.log(`[Shadchan] Date set for ${when.toISOString()}; follow-up due ${new Date(when.getTime() + 86400000).toISOString()}`);
       } else {
         console.warn(`[Shadchan] Ignoring unusable dateLocal "${ai.dateLocal}"`);
@@ -799,6 +811,40 @@ exports.followUpAfterDates = onSchedule({
       console.log(`[Shadchan] Not-a-match notice sent to ${doc.id}:`, result);
     } catch (err) {
       console.error(`Notice failed for ${doc.id}:`, err);
+    }
+  }
+
+  // 1b) Morning-of reminders. Goes out at the first safe moment between the reminder time and an
+  // hour before the date. If Shabbos or Yom Tov covers that whole stretch, it's skipped.
+  const remSnap = await db.collection("aiMatchmakerSessions").where("dateDetails.reminderAt", "<=", nowTs).get();
+  for (const doc of remSnap.docs) {
+    const d = doc.data();
+    const dd1 = d.dateDetails || {};
+    try {
+      const atMs = dd1.at?.toMillis?.();
+      if (dd1.reminderSent || d.status === "opted_out" || !atMs || atMs - nowTs.toMillis() < 60 * 60 * 1000) {
+        await doc.ref.update({ "dateDetails.reminderAt": admin.firestore.FieldValue.delete() }).catch(() => {});
+        continue;
+      }
+      const first = (d.userName || "").split(" ")[0] || "there";
+      const otherFirst = ((d.candidatePipeline?.[d.currentPipelineIndex]?.name) || "").split(" ")[0] || "them";
+      const atDate = new Date(atMs);
+      const timeStr = new Intl.DateTimeFormat("en-US", { timeZone: SHADCHAN_TZ, hour: "numeric", minute: "2-digit" }).format(atDate);
+      const hr = Number(new Intl.DateTimeFormat("en-US", { timeZone: SHADCHAN_TZ, hourCycle: "h23", hour: "numeric" }).format(atDate));
+      const when = hr >= 17 ? `tonight at ${timeStr}` : `today at ${timeStr}`;
+      const where = dd1.address ? ` at ${dd1.address}` : "";
+      const text = `Good morning ${first}, just a reminder that you're meeting ${otherFirst} ${when}${where}. Have a great time!`;
+
+      // Mark first, so an overlapping run can't text the same person twice.
+      await commitCrossSession(doc.ref, {
+        "dateDetails.reminderAt": admin.firestore.FieldValue.delete(),
+        "dateDetails.reminderSent": true
+      }, [{ sender: "ai", text, timestamp: new Date().toISOString() }]);
+      const result = await sendTelnyxMessage(d.userPhoneNumber, text);
+      if (result?.blocked) await doc.ref.update({ status: "opted_out" }).catch(() => {});
+      console.log(`[Shadchan] Date reminder sent to ${doc.id}:`, result);
+    } catch (err) {
+      console.error(`Reminder failed for ${doc.id}:`, err);
     }
   }
 
@@ -1018,7 +1064,7 @@ HOW A DATE GETS SET
 If the time is agreed and her address isn't in yet, and ${firstName} is the woman, ask for it (unless your last message already did and she hasn't answered). If ${firstName} is the man and asks, say you're waiting on her address and he'll get it as soon as she sends it.
 
 ONCE THE DATE IS SET
-- When the time is agreed and her address has been sent, you're done until the day after the date. Don't text first, check in, or remind anyone. Only reply when they text you something that needs an answer.
+- When the time is agreed and her address has been sent, you're done until the day after the date. The only text that goes out on its own is a reminder the morning of the date, which is sent for you. Don't text first or check in otherwise. Only reply when they text you something that needs an answer.
 - If they only acknowledge ("ok", "thanks", "great", "will do"), use no_reply. Still write the reply you would have sent in replyText. It's only a backup and won't be sent.
 
 ${dd.noticeSent ? `AFTER THE NOT-A-MATCH NEWS
