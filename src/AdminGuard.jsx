@@ -5,17 +5,13 @@ import {
   createUserWithEmailAndPassword, 
   signInWithPopup, 
   onAuthStateChanged, 
-  signOut 
+  signOut,
+  sendEmailVerification
 } from 'firebase/auth';
 import { Loader2 } from 'lucide-react';
+import { ALLOWED_ADMINS } from './adminConfig';
 
-// ==========================================
-// 1. ADD YOUR ALLOWED ADMIN EMAILS HERE
-// ==========================================
-const ALLOWED_ADMINS = [
-  'tikvahtogetherevents@gmail.com',
-  'info@tikvahtogether.org',
-];
+// Allowed admin emails live in adminConfig.js
 
 export default function AdminGuard({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -32,8 +28,21 @@ export default function AdminGuard({ children }) {
         // ==========================================
         // 2. THE SECURITY CHECK
         // ==========================================
-        if (ALLOWED_ADMINS.includes(user.email?.toLowerCase())) {
+        // Password accounts can be created for any address without owning it, so they only
+        // count once the address is verified. Google sign-ins come back already verified.
+        const passwordOnly = user.providerData.every((p) => p.providerId === "password");
+        const allowed = ALLOWED_ADMINS.includes(user.email?.toLowerCase());
+        if (allowed && (user.emailVerified || !passwordOnly)) {
           setIsAuthenticated(true);
+        } else if (allowed) {
+          try {
+            await sendEmailVerification(user);
+            setErrorMsg(`Please verify your email first. We sent a link to ${user.email}, then sign in again.`);
+          } catch {
+            setErrorMsg(`Please verify ${user.email} using the link we emailed you, then sign in again.`);
+          }
+          setIsAuthenticated(false);
+          await signOut(auth);
         } else {
           // If they aren't on the list, kick them out completely!
           setErrorMsg("Access Denied: Your account is not authorized as an administrator.");
@@ -64,9 +73,9 @@ export default function AdminGuard({ children }) {
 
     try {
       if (isRegistering) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        await createUserWithEmailAndPassword(auth, targetEmail, password);
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        await signInWithEmailAndPassword(auth, targetEmail, password);
       }
     } catch (error) {
       if (error.code === 'auth/email-already-in-use') {
@@ -212,4 +221,4 @@ export default function AdminGuard({ children }) {
       {children}
     </div>
   );
-}
+}

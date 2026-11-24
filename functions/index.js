@@ -197,7 +197,9 @@ exports.autoCompleteEventsAndRunAI = onSchedule({
   const now = admin.firestore.Timestamp.now();
   const eventsRef = db.collection("events");
 
-  const snapshot = await eventsRef.where("isCompleted", "==", false).where("aiProcessed", "==", false).get();
+  // Events created before aiProcessed existed don't have the field at all, and an
+  // equality filter on it would skip them, so filter that part here instead.
+  const snapshot = await eventsRef.where("isCompleted", "==", false).get();
 
   if (snapshot.empty) {
     console.log("No pending events to process.");
@@ -210,11 +212,20 @@ exports.autoCompleteEventsAndRunAI = onSchedule({
   snapshot.forEach((doc) => {
     const eventData = doc.data();
 
+    if (eventData.aiProcessed === true) return;
     if (!eventData.scheduledAt) return;
 
     const scheduledTimeMs = eventData.scheduledAt.toDate().getTime();
     const eighteenHoursMs = 18 * 60 * 60 * 1000;
     const targetCompletionTime = scheduledTimeMs + eighteenHoursMs;
+
+    // Only events from the last few days. Without this, an old event that was never
+    // completed (a test event, say) would suddenly start texting people about it.
+    const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // generous enough to outlast a 3-day Yom Tov + Shabbos pause
+    if (Date.now() - targetCompletionTime > MAX_AGE_MS) {
+      console.log(`Skipping stale event ${doc.id}: scheduled too long ago to start texting about it.`);
+      return;
+    }
 
     if (Date.now() >= targetCompletionTime) {
       console.log(`Auto-completing event: ${doc.id}`);
@@ -314,7 +325,13 @@ async function runAiShadchanFunctions(eventId) {
           }
         });
 
-        const pipeline = [...priorityYes, ...standardYes, ...maybes];
+        // Older admin entries could list the same partner twice; keep each candidate once (best bucket wins)
+        const seenCandidates = new Set();
+        const pipeline = [...priorityYes, ...standardYes, ...maybes].filter(c => {
+          if (seenCandidates.has(c.candidateId)) return false;
+          seenCandidates.add(c.candidateId);
+          return true;
+        });
         
         // Use 'return' instead of 'continue' since we are inside a map callback
         if (pipeline.length === 0) return;
@@ -429,6 +446,7 @@ exports.handleIncomingTelnyx = onRequest(
       console.log(`[Shadchan] Inbound media from ${fromPhone}:`, incomingMedia.map(m => ({ url: m.url, content_type: m.content_type })));
     }
     if (!incomingText && !incomingMedia.length) { res.sendStatus(200); return; }
+    if (!fromPhone) { console.warn("[Shadchan] Inbound message with no sender number"); res.sendStatus(200); return; }
 
     try {
       // Telnyx re-delivers webhooks. Without this the user gets double-texted.
@@ -833,7 +851,9 @@ exports.followUpAfterDates = onSchedule({
       const hr = Number(new Intl.DateTimeFormat("en-US", { timeZone: SHADCHAN_TZ, hourCycle: "h23", hour: "numeric" }).format(atDate));
       const when = hr >= 17 ? `tonight at ${timeStr}` : `today at ${timeStr}`;
       const where = dd1.address ? ` at ${dd1.address}` : "";
-      const text = `Good morning ${first}, just a reminder that you're meeting ${otherFirst} ${when}${where}. Have a great time!`;
+      const nowHr = Number(new Intl.DateTimeFormat("en-US", { timeZone: SHADCHAN_TZ, hourCycle: "h23", hour: "numeric" }).format(new Date()));
+      const greeting = nowHr < 12 ? "Good morning" : "Hi";
+      const text = `${greeting} ${first}, just a reminder that you're meeting ${otherFirst} ${when}${where}. Have a great time!`;
 
       // Mark first, so an overlapping run can't text the same person twice.
       await commitCrossSession(doc.ref, {
@@ -1440,16 +1460,33 @@ async function claimTurn(ref, messageId) {
   });
 }
 
+// set() treats "a.b" keys as literal field names (only update() reads them as paths), so
+// expand them into nested objects. With { merge: true } nested objects merge field by field.
+function expandDottedKeys(patch) {
+  const out = {};
+  for (const [key, value] of Object.entries(patch)) {
+    const parts = key.split(".");
+    let node = out;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const existing = node[parts[i]];
+      if (!existing || typeof existing !== "object" || existing.constructor !== Object) node[parts[i]] = {};
+      node = node[parts[i]];
+    }
+    node[parts[parts.length - 1]] = value;
+  }
+  return out;
+}
+
 // Append-only commit — never overwrites a concurrent writer's messages.
 async function commitTurn(ref, patch, newMessages = []) {
-  const body = { ...patch, processingUntil: null };
+  const body = { ...expandDottedKeys(patch), processingUntil: null };
   if (newMessages.length) body.messages = admin.firestore.FieldValue.arrayUnion(...newMessages);
   await ref.set(body, { merge: true });
 }
 
 // Cross-session write: never touch their turn lock, they may be mid-generation.
 async function commitCrossSession(ref, patch, newMessages = []) {
-  const body = { ...patch };
+  const body = expandDottedKeys(patch);
   if (newMessages.length) body.messages = admin.firestore.FieldValue.arrayUnion(...newMessages);
   await ref.set(body, { merge: true });
 }

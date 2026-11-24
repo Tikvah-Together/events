@@ -91,6 +91,7 @@ const RsvpPage = () => {
 
   const handleResponse = async (newStatus) => {
     setStep("loading");
+    setErrorMsg("");
     setRegStatus(newStatus);
     try {
       // 1. Update the 'registrations' document using the ID we found earlier
@@ -100,6 +101,9 @@ const RsvpPage = () => {
 
       // 2. Trigger the Confirmation Email if they accepted
       if (newStatus === "confirmed" && action !== "cancel") {
+        const cancelUrl = new URL(window.location.href);
+        cancelUrl.hash = "";
+        cancelUrl.searchParams.set("action", "cancel");
         await addDoc(collection(db, "email"), {
           to: attendee.email,
           message: {
@@ -110,7 +114,7 @@ const RsvpPage = () => {
         <p>You're <strong>confirmed</strong> for the upcoming SY SmartMatch event.<br>We're looking forward to having you!</p>
         <p>Full event details will be sent the day before the event.</p>
         <p style="margin-top: 20px; font-size: 13px;">
-          If your availability changes before the event, you can update your status here: <a href="${window.location + "&action=cancel"}" style="color: #95B699; font-weight: bold;">Cancel Registration</a>
+          If your availability changes before the event, you can update your status here: <a href="${cancelUrl.toString()}" style="color: #95B699; font-weight: bold;">Cancel Registration</a>
         </p>
         <br>
         <p style="font-weight: bold;">SY SmartMatch Team</p>
@@ -207,6 +211,11 @@ const RsvpPage = () => {
           <p className="text-slate-500 mb-8">
             Hi {attendee?.firstName}, would you like to cancel your invitation?
           </p>
+          {errorMsg && (
+            <p className="bg-red-50 text-red-600 text-sm p-3 rounded-xl mb-4 border border-red-100">
+              {errorMsg}
+            </p>
+          )}
 
           <div className="space-y-4">
             <button
@@ -237,6 +246,11 @@ const RsvpPage = () => {
         <p className="text-slate-500 mb-8">
           Hi {attendee?.firstName}, would you like to attend?
         </p>
+        {errorMsg && (
+          <p className="bg-red-50 text-red-600 text-sm p-3 rounded-xl mb-4 border border-red-100">
+          {errorMsg}
+          </p>
+        )}
 
         <div className="space-y-4">
           <button

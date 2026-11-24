@@ -6,10 +6,10 @@ import {
   where,
   onSnapshot,
   doc,
+  getDoc,
   updateDoc,
   orderBy,
   limit,
-  arrayUnion,
 } from "firebase/firestore";
 import LiveRoundView from "./LiveRoundView";
 import {
@@ -148,7 +148,7 @@ export default function Event() {
 
     if (registeredMatches.length === 0) {
       setError(
-        "Profile found, but no registration for this event was detected.",
+        "Profile found, but you're not checked in for this event yet. Please check in at the front desk.",
       );
     } else if (registeredMatches.length === 1) {
       // Only one person? Log them in immediately
@@ -180,37 +180,51 @@ export default function Event() {
     if (!adminTargetUser || !manualEntry.partnerId) return;
 
     try {
-      const userRef = doc(db, "users", adminTargetUser.id);
+      // Grid squares pass { ...user, ...registration }, whose id is the registration's
+      const targetUserId = adminTargetUser.userId || adminTargetUser.id;
+      const userRef = doc(db, "users", targetUserId);
+      const partner = masterUsers.find((u) => u.id === manualEntry.partnerId);
+      const partnerName = partner
+        ? `${partner.firstName || ""} ${partner.lastName || ""}`.trim() || "Unknown"
+        : "Unknown";
+
+      // Read the user's current feedback (a doc reference carries no data)
+      const userSnap = await getDoc(userRef);
+      let feedback = (userSnap.exists() && userSnap.data().feedbackData) || [];
+
+      // Only one priority per event: clear the others for this event
       if (manualEntry.isPriority) {
-        // need to make all other entries for this user non-priority if this one is marked as priority
-        const existingFeedback = userRef.feedbackData || [];
-        const updatedFeedback = existingFeedback.map((entry) => ({
-          ...entry,
-          isPriority: false, // reset all to non-priority
-        }));
-        await updateDoc(userRef, { feedbackData: updatedFeedback });
+        feedback = feedback.map((entry) =>
+          entry.event === selectedEventId ? { ...entry, isPriority: false } : entry,
+        );
       }
-      await updateDoc(userRef, {
-        feedbackData: arrayUnion({
-          event: selectedEventId,
-          partnerName:
-            masterUsers.find((u) => u.id === manualEntry.partnerId)?.firstName +
-              " " +
-              masterUsers.find((u) => u.id === manualEntry.partnerId)
-                ?.lastName || "Unknown",
-          partnerId: manualEntry.partnerId,
-          interested: manualEntry.interest,
-          isPriority: manualEntry.isPriority || false,
-          optionalNotes: manualEntry.optionalNotes || "",
-          round: manualEntry.round,
-          tableNumber: "Admin Entry",
-          timestamp: new Date(),
-        }),
-      });
+
+      const newEntry = {
+        event: selectedEventId,
+        partnerName,
+        partnerId: manualEntry.partnerId,
+        interested: manualEntry.interest,
+        isPriority: manualEntry.isPriority || false,
+        optionalNotes: manualEntry.optionalNotes || "",
+        round: manualEntry.round,
+        tableNumber: "Admin Entry",
+        timestamp: new Date(),
+      };
+
+      // Replace an existing entry for the same partner/event instead of duplicating it
+      const existingIndex = feedback.findIndex(
+        (f) => f.event === selectedEventId && f.partnerId === manualEntry.partnerId,
+      );
+      if (existingIndex > -1) feedback[existingIndex] = newEntry;
+      else feedback = [...feedback, newEntry];
+
+      await updateDoc(userRef, { feedbackData: feedback });
       alert(`Entry saved for ${adminTargetUser.firstName}`);
       setAdminTargetUser(null);
+      setManualEntry({ partnerId: "", interest: "yes", optionalNotes: "", round: 1, isPriority: false });
     } catch (err) {
       console.error(err);
+      alert("Couldn't save that entry. Please try again.");
     }
   };
 
@@ -361,8 +375,11 @@ export default function Event() {
   }, [attendees]);
 
   // Helper to render a table square with drag and drop listeners
-  const TableSquare = ({ person, tableNum, colorClass, groupId }) => (
+  // A render helper rather than a component: a component defined inside render is a new
+  // type every render, so React remounts every square (mid-drag included) on each update.
+  const renderTableSquare = ({ squareKey, person, tableNum, colorClass, groupId }) => (
     <div
+      key={squareKey}
       draggable={!!person}
       onDragStart={(e) => {
         // Required by some browser engines to properly initialize drag sequences
@@ -511,15 +528,13 @@ useEffect(() => {
                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
                       {group.girlsRow.map((person, idx) => {
                         const tableNum = idx + 1;
-                        return (
-                          <TableSquare
-                            key={`group-${group.groupId}-girl-${tableNum}`}
-                            person={person}
-                            tableNum={tableNum}
-                            groupId={group.groupId}
-                            colorClass="bg-pink-100 text-pink-700 border-pink-200"
-                          />
-                        );
+                        return renderTableSquare({
+                          squareKey: `group-${group.groupId}-girl-${tableNum}`,
+                          person,
+                          tableNum,
+                          groupId: group.groupId,
+                          colorClass: "bg-pink-100 text-pink-700 border-pink-200",
+                        });
                       })}
                     </div>
                   </section>
@@ -532,15 +547,13 @@ useEffect(() => {
                     <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-3">
                       {group.boysRow.map((person, idx) => {
                         const tableNum = idx + 1;
-                        return (
-                          <TableSquare
-                            key={`group-${group.groupId}-boy-${tableNum}`}
-                            person={person}
-                            tableNum={tableNum}
-                            groupId={group.groupId}
-                            colorClass="bg-blue-100 text-blue-700 border-blue-200"
-                          />
-                        );
+                        return renderTableSquare({
+                          squareKey: `group-${group.groupId}-boy-${tableNum}`,
+                          person,
+                          tableNum,
+                          groupId: group.groupId,
+                          colorClass: "bg-blue-100 text-blue-700 border-blue-200",
+                        });
                       })}
                     </div>
                   </section>
@@ -589,7 +602,7 @@ useEffect(() => {
                     </div>
                     <div className="text-xs text-slate-500">
                       Starting Table: {registration.groupId} -{" "}
-                      {"Table " + registration.tableNumber || "N/A"}
+                      {registration.tableNumber ? `Table ${registration.tableNumber}` : "N/A"}
                     </div>
                     <div className="text-xs text-slate-500">
                       Feedback recorded: {user.feedbackData?.length || 0} rounds

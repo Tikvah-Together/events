@@ -74,6 +74,7 @@ function AppLayout() {
           <Route path="/rsvp" element={<RsvpPage />} />
           <Route path="/selfcheckin" element={<SelfCheckIn />} />
           <Route path="/organizer" element={<OrganizerDisplay />} />
+          <Route path="*" element={<Home />} />
         </Routes>
       </main>
 

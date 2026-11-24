@@ -15,6 +15,7 @@ import {
   orderBy,
   onSnapshot,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import {
   Plus,
@@ -144,7 +145,13 @@ export default function AdminDashboard() {
 
     // 3. Advanced Filters
     if (filters.gender !== "all" && a.gender !== filters.gender) return false;
-    if (filters.ethnicity !== "all" && a.ethnicity !== filters.ethnicity)
+    if (
+      filters.ethnicity !== "all" &&
+      !String(a.ethnicity || "")
+        .split(",")
+        .map((e) => e.trim().toLowerCase())
+        .includes(filters.ethnicity.toLowerCase())
+    )
       return false;
     if (
       filters.maritalStatus !== "all" &&
@@ -225,14 +232,12 @@ export default function AdminDashboard() {
       const eventRef = doc(db, "events", id);
       const newStatus = !currentStatus;
 
-      // 1. Update Firestore
-      await updateDoc(eventRef, { active: newStatus });
+      // 1. Update Firestore (launching only goes live if there are people to pair)
       if (newStatus) {
-        // If activating, launch the event
-        launchEvent();
+        const launched = await launchEvent();
+        if (!launched) return;
       } else {
-        // If deactivating, set all attendees to not checked in
-        //setAttendeesNotCheckedIn(id);
+        await updateDoc(eventRef, { active: false });
       }
 
       // 2. Update the Main Detail View immediately
@@ -317,8 +322,7 @@ export default function AdminDashboard() {
 
     if (men.length === 0 || women.length === 0) {
       alert("You need checked-in men and women to start!");
-      toggleStatus(selectedEvent.id, true); // Revert the event to inactive
-      return;
+      return false;
     }
 
     // Launch with a Start Timestamp
@@ -330,6 +334,7 @@ export default function AdminDashboard() {
       isCompleted: false,
       endDate: null,
     });
+    return true;
   };
 
   const toggleCheckIn = async (attendeeId, currentStatus) => {
@@ -458,17 +463,27 @@ export default function AdminDashboard() {
         return;
       }
 
-      // 2. Write to the "mail" collection
-      await addDoc(collection(db, "mail"), {
-        to: recipientsEmails, // Send to the mapped email array
-        message: {
-          subject: emailData.subject,
-          text: emailData.body,
-          html: emailData.body.replace(/\n/g, "<br>"),
-        },
-        eventId: selectedEvent?.id,
-        timestamp: new Date(),
-      });
+      // 2. One doc per person in the "email" collection the mail extension watches
+      //    (a single doc with every address in "to" would show everyone's email to everyone)
+      const escapeHtml = (str) =>
+        str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const html = escapeHtml(emailData.body).replace(/\n/g, "<br>");
+      for (let i = 0; i < recipientsEmails.length; i += 450) {
+        const batch = writeBatch(db);
+        recipientsEmails.slice(i, i + 450).forEach((to) => {
+          batch.set(doc(collection(db, "email")), {
+            to,
+            message: {
+              subject: emailData.subject,
+              text: emailData.body,
+              html,
+            },
+            eventId: selectedEvent?.id || null,
+            timestamp: new Date(),
+          });
+        });
+        await batch.commit();
+      }
 
       setShowEmailModal(false);
       setEmailData({ recipients: [], subject: "", body: "" }); // Reset to empty array
@@ -490,6 +505,7 @@ export default function AdminDashboard() {
     try {
       await addDoc(collection(db, "email"), {
         to: userData.email,
+        eventId: eventData.id,
         message: {
           subject: "SY SmartMatch: Event Login & Check-In Confirmation",
           html: `
@@ -565,6 +581,7 @@ export default function AdminDashboard() {
     try {
       await addDoc(collection(db, "email"), {
         to: userData.email,
+        eventId: eventData.id,
         message: {
           subject: "SY SmartMatch: Event Details & Reminder",
           html: `
@@ -602,6 +619,7 @@ export default function AdminDashboard() {
     try {
       await addDoc(collection(db, "email"), {
         to: userData.email,
+        eventId: eventData.id,
         message: {
           subject: "SY SmartMatch – Final Reminder to Confirm Your Spot",
           html: `
@@ -643,14 +661,16 @@ export default function AdminDashboard() {
         const inviteParams = `?userId=${a.userId}&eventId=${selectedEvent?.id}`;
         const fullUrl = baseUrl + inviteParams;
 
-        // 2. Update the registration status
+        // 2. Update the registration status (invitedAt drives the 3-day "no response" cleanup)
         await updateDoc(doc(db, "registrations", a.id), {
           status: "invited",
+          invitedAt: new Date(),
         });
 
         // 3. Trigger the invitation email
         await addDoc(collection(db, "email"), {
           to: a.email,
+          eventId: selectedEvent?.id || null,
           message: {
             subject: `SY SmartMatch - You're Invited`,
             html: `
@@ -757,6 +777,7 @@ export default function AdminDashboard() {
 
     try {
       const promises = trulyNewIds.map(async (userId) => {
+        const u = masterUsers.find((m) => m.id === userId) || {};
         return addDoc(collection(db, "registrations"), {
           userId,
           eventId: targetEventId,
@@ -764,6 +785,12 @@ export default function AdminDashboard() {
           groupId: "Group 1", // Default group
           status: "pending invite",
           checkedIn: false,
+          tableNumber: null,
+          // Same copies a self-registration stores (table layout reads gender from here)
+          gender: u.gender || "",
+          firstName: u.firstName || "",
+          lastName: u.lastName || "",
+          timestamp: new Date(),
         });
       });
 
@@ -825,7 +852,7 @@ export default function AdminDashboard() {
       }
 
       // Rule 3: Only Female range has values -> Default to "woman"
-      if (hasMaleAge && !hasFemaleAge) {
+      if (!hasMaleAge && hasFemaleAge) {
         if (prev.gender === "woman") return prev;
         return { ...prev, gender: "woman" };
       }
@@ -858,10 +885,21 @@ export default function AdminDashboard() {
         const detailsSent = [];
         const finalSent = [];
 
+        const eventCreatedMs = selectedEvent.createdAt?.toMillis?.() ?? 0;
+
         querySnapshot.forEach((doc) => {
           const data = doc.data();
           const subject = data.message?.subject;
           const recipient = data.to;
+
+          // Only count emails for THIS event. Older emails have no eventId, so for
+          // those fall back to "sent after this event was created".
+          if (data.eventId) {
+            if (data.eventId !== selectedEvent.id) return;
+          } else {
+            const sentMs = data.delivery?.startTime?.toMillis?.() ?? 0;
+            if (!sentMs || sentMs < eventCreatedMs) return;
+          }
 
           // Find the attendee that matches this email to get their userId
           const attendee = attendees.find((attr) => attr.email === recipient);
@@ -964,16 +1002,28 @@ export default function AdminDashboard() {
       const userIds = registrationDocs.map((reg) => reg.userId).filter(Boolean);
 
       if (userIds.length > 0) {
-        // Fetch user profiles from the 'users' collection
-        const usersQuery = query(
-          collection(db, "users"),
-          where(documentId(), "in", userIds),
-        );
-        const userSnap = await getDocs(usersQuery);
+        // Fetch user profiles from the 'users' collection.
+        // Firestore "in" queries accept at most 30 values, so look them up in chunks.
         const userMap = {};
-        userSnap.forEach((doc) => {
-          userMap[doc.id] = doc.data();
-        });
+        try {
+          const uniqueIds = [...new Set(userIds)];
+          const chunks = [];
+          for (let i = 0; i < uniqueIds.length; i += 30) {
+            chunks.push(uniqueIds.slice(i, i + 30));
+          }
+          const snaps = await Promise.all(
+            chunks.map((ids) =>
+              getDocs(query(collection(db, "users"), where(documentId(), "in", ids))),
+            ),
+          );
+          snaps.forEach((userSnap) =>
+            userSnap.forEach((doc) => {
+              userMap[doc.id] = doc.data();
+            }),
+          );
+        } catch (err) {
+          console.error("Error loading attendee profiles:", err);
+        }
 
         // Merge Registration data with User profile data
         const mergedData = registrationDocs.map((reg) => ({
@@ -1031,17 +1081,20 @@ export default function AdminDashboard() {
         const q = query(
           collection(db, "registrations"),
           where("status", "==", "invited"),
-          where("invitedAt", "<", threeDaysAgo),
         );
 
         const querySnapshot = await getDocs(q);
+        const expired = querySnapshot.docs.filter((d) => {
+          const invitedAt = d.data().invitedAt?.toDate?.();
+          return invitedAt && invitedAt < threeDaysAgo;
+        });
 
-        if (querySnapshot.empty) return;
+        if (expired.length === 0) return;
 
         // 3. Use a WriteBatch for better performance and atomicity
         const batch = writeBatch(db);
 
-        querySnapshot.docs.forEach((docSnap) => {
+        expired.forEach((docSnap) => {
           const docRef = doc(db, "registrations", docSnap.id);
           batch.update(docRef, {
             status: "no response",
@@ -1050,7 +1103,7 @@ export default function AdminDashboard() {
 
         await batch.commit();
         console.log(
-          `Successfully moved ${querySnapshot.size} users to 'no response'.`,
+          `Successfully moved ${expired.length} users to 'no response'.`,
         );
       } catch (err) {
         console.error("Error during invite cleanup:", err);
@@ -1082,6 +1135,7 @@ export default function AdminDashboard() {
         generalLocation: generalLocation,
         fullAddress: fullAddress,
         isCompleted: false,
+        aiProcessed: false,
         endDate: null,
       });
 
@@ -1107,12 +1161,26 @@ export default function AdminDashboard() {
       const isRegistrationField = registrationFields.includes(field);
 
       const collectionName = isRegistrationField ? "registrations" : "users";
-      const docId = isRegistrationField ? attendee.id : attendee.userId;
+      // Event rows are { ...registration, ...user } (id = registration id, userId = user id);
+      // Master List rows are plain users (id = user id, no userId).
+      const docId = isRegistrationField
+        ? attendee.id
+        : attendee.userId || attendee.id;
 
       if (!docId) return;
 
       const docRef = doc(db, collectionName, docId);
       await updateDoc(docRef, { [field]: newValue });
+
+      // Registrations keep their own copy of gender (used for table layout), so update those too
+      if (field === "gender") {
+        const regs = allRegistrations.filter((r) => r.userId === docId);
+        await Promise.all(
+          regs.map((r) =>
+            updateDoc(doc(db, "registrations", r.id), { gender: newValue }),
+          ),
+        );
+      }
 
       setAttendees((prev) =>
         prev.map((a) =>
@@ -1133,8 +1201,21 @@ export default function AdminDashboard() {
         "Are you sure? This will delete all registration data for this event.",
       )
     ) {
-      await deleteDoc(doc(db, "events", id));
-      setSelectedEvent(null);
+      try {
+        const regSnap = await getDocs(
+          query(collection(db, "registrations"), where("eventId", "==", id)),
+        );
+        for (let i = 0; i < regSnap.docs.length; i += 450) {
+          const batch = writeBatch(db);
+          regSnap.docs.slice(i, i + 450).forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+        await deleteDoc(doc(db, "events", id));
+        setSelectedEvent(null);
+      } catch (err) {
+        console.error("Error deleting event:", err);
+        alert("Failed to delete the event.");
+      }
     }
   };
 
@@ -1507,6 +1588,16 @@ export default function AdminDashboard() {
                                   const newGroup = {
                                     name: newGroupName.trim(),
                                   };
+                                  if (
+                                    existingGroups.some(
+                                      (g) =>
+                                        String(g.name).toLowerCase() ===
+                                        newGroup.name.toLowerCase(),
+                                    )
+                                  ) {
+                                    alert(`A group named "${newGroup.name}" already exists.`);
+                                    return;
+                                  }
 
                                   const updatedGroups = [
                                     ...existingGroups,
@@ -1556,27 +1647,67 @@ export default function AdminDashboard() {
                             ?.eventGroups || []
                         ).map((group, idx) => (
                           <div
-                            key={group.name}
+                            key={`${idx}-${group.name}`}
                             className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm hover:border-blue-300 transition-colors"
                           >
+                            {/* Saved on blur/Enter: writing on every keystroke re-keyed the input and lost focus */}
                             <input
                               className="text-xs font-bold w-32 outline-none text-slate-700"
-                              value={group.name}
-                              onChange={async (e) => {
+                              defaultValue={group.name}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") e.currentTarget.blur();
+                              }}
+                              onBlur={async (e) => {
+                                const oldName = group.name;
+                                const newName = e.target.value.trim();
+                                if (!newName || newName === oldName) {
+                                  e.target.value = oldName;
+                                  return;
+                                }
                                 const liveEvent = events.find(
                                   (ev) => ev.id === selectedEvent.id,
                                 );
-                                const updatedGroups = [
-                                  ...liveEvent.eventGroups,
-                                ];
-                                updatedGroups[idx].name = e.target.value;
-
-                                await updateDoc(
-                                  doc(db, "events", selectedEvent.id),
-                                  {
-                                    eventGroups: updatedGroups,
-                                  },
-                                );
+                                const groupsNow = liveEvent?.eventGroups || [];
+                                if (
+                                  groupsNow.some(
+                                    (g, i) =>
+                                      i !== idx &&
+                                      String(g.name).toLowerCase() ===
+                                        newName.toLowerCase(),
+                                  )
+                                ) {
+                                  alert(`A group named "${newName}" already exists.`);
+                                  e.target.value = oldName;
+                                  return;
+                                }
+                                try {
+                                  const updatedGroups = groupsNow.map((g, i) =>
+                                    i === idx ? { ...g, name: newName } : g,
+                                  );
+                                  await updateDoc(
+                                    doc(db, "events", selectedEvent.id),
+                                    { eventGroups: updatedGroups },
+                                  );
+                                  // Registrations store the group by name, so move them too
+                                  const regSnap = await getDocs(
+                                    query(
+                                      collection(db, "registrations"),
+                                      where("eventId", "==", selectedEvent.id),
+                                      where("groupId", "==", oldName),
+                                    ),
+                                  );
+                                  for (let i = 0; i < regSnap.docs.length; i += 450) {
+                                    const batch = writeBatch(db);
+                                    regSnap.docs
+                                      .slice(i, i + 450)
+                                      .forEach((d) => batch.update(d.ref, { groupId: newName }));
+                                    await batch.commit();
+                                  }
+                                } catch (err) {
+                                  console.error("Error renaming group:", err);
+                                  alert("Failed to rename the group.");
+                                  e.target.value = oldName;
+                                }
                               }}
                             />
                             <button
@@ -1699,7 +1830,9 @@ export default function AdminDashboard() {
                             Force Start "AI Shadchan" now
                           </button>
                           <span className="text-xs text-slate-500">
-                            AI Shadchan will start at {new Date(selectedEvent.scheduledAt.toDate().getTime() + 18 * 60 * 60 * 1000).toLocaleString()}
+                            {selectedEvent.scheduledAt?.toDate
+                              ? `AI Shadchan will start at ${new Date(selectedEvent.scheduledAt.toDate().getTime() + 18 * 60 * 60 * 1000).toLocaleString()}`
+                              : "Set a date for this event to schedule the AI Shadchan"}
                           </span>
                           </div>
                         ) : (
@@ -1941,6 +2074,7 @@ export default function AdminDashboard() {
                           <option value="all">Any</option>
                           <option value="Single">Single</option>
                           <option value="Divorced">Divorced</option>
+                          <option value="Widowed">Widowed</option>
                         </select>
                       </div>
 
@@ -2765,7 +2899,7 @@ export default function AdminDashboard() {
                                     <td className="px-6 py-4 text-slate-400 italic text-[11px]">
                                       <textarea
                                         className="bg-transparent border border-slate-100 rounded p-1 w-40 h-10 leading-tight outline-none focus:bg-white"
-                                        value={a.otherSpecify}
+                                        value={a.otherSpecify || ""}
                                         onChange={(e) =>
                                           updateAttendeeField(
                                             a,
@@ -2937,7 +3071,7 @@ export default function AdminDashboard() {
                                           updateAttendeeField(
                                             a,
                                             "anythingElse",
-                                            e.target.value.map((s) => s.trim()),
+                                            e.target.value.trim(),
                                           )
                                         }
                                       />

@@ -112,7 +112,7 @@ export default function OrganizerDisplay() {
           </h1>
           <p className="text-lg text-slate-500 font-medium flex items-center justify-center gap-2">
             <MapPin size={22} className="text-[#1E3D34]" />
-            {eventData.address || "Address not specified"}
+            {eventData.fullAddress || eventData.generalLocation || "Address not specified"}
           </p>
           <div className="py-12 px-6 rounded-2xl bg-amber-50 border-2 border-amber-200 text-amber-900 mt-4">
             <Clock size={48} className="mx-auto mb-3 text-amber-600 animate-bounce" />
@@ -199,7 +199,7 @@ export default function OrganizerDisplay() {
           </h1>
           <p className="text-lg md:text-xl text-slate-600 font-medium flex items-center justify-center gap-2">
             <MapPin size={24} className="text-[#1E3D34] shrink-0" />
-            <span>{eventData.fullAddress || "Address not specified"}</span>
+            <span>{eventData.fullAddress || eventData.generalLocation || "Address not specified"}</span>
           </p>
         </div>
 
@@ -329,4 +329,4 @@ export default function OrganizerDisplay() {
       </div>
     </div>
   );
-}
+}

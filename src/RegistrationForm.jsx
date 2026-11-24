@@ -87,7 +87,16 @@ export default function RegistrationForm() {
         // Otherwise, fetch all events for the dropdown. They should be inactive.
         const q = query(collection(db, "events"), where("active", "==", false));
         const snap = await getDocs(q);
-        setEvents(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+        setEvents(
+          snap.docs
+            .map((doc) => ({ id: doc.id, ...doc.data() }))
+            .filter((ev) => !ev.isCompleted)
+            .sort(
+              (a, b) =>
+                (a.scheduledAt?.toMillis?.() || 0) -
+                (b.scheduledAt?.toMillis?.() || 0),
+            ),
+        );
       }
     };
     fetchEventData();
@@ -95,7 +104,9 @@ export default function RegistrationForm() {
 
   const calculateAge = (dateString) => {
     const today = new Date();
-    const birthDate = new Date(dateString);
+    // "YYYY-MM-DD" parses as UTC midnight, which is the previous evening in New York
+    const [y, mo, d] = String(dateString).split("-").map(Number);
+    const birthDate = new Date(y, (mo || 1) - 1, d || 1);
     let age = today.getFullYear() - birthDate.getFullYear();
     const m = today.getMonth() - birthDate.getMonth();
     if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
@@ -145,12 +156,28 @@ export default function RegistrationForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.eventId) return alert("Please select an event");
+    if (calculateAge(formData.birthDate) < 18) {
+      return alert("You must be at least 18 years old to register for SY SmartMatch.");
+    }
     setLoading(true);
 
     try {
       // 1. Split the data
       const { eventId, ...userProfile } = formData;
       userProfile.ethnicity = userProfile.ethnicity.join(", "); // Convert array to string for storage
+      // Store email/phone in the same shape every lookup uses (lowercase email, digits-only phone)
+      userProfile.email = formData.email.toLowerCase().trim();
+      userProfile.phone = formData.phone.replace(/\D/g, "");
+      userProfile.firstName = formData.firstName.trim();
+      userProfile.lastName = formData.lastName.trim();
+      // Don't keep answers from the other gender's questions if they switched gender mid-form
+      if (formData.gender === "woman") {
+        userProfile.isKohen = "no";
+        userProfile.wantsCoveredHead = "N/A";
+      } else {
+        userProfile.hairCovering = "N/A";
+        userProfile.dressStyle = "N/A";
+      }
       const userAge = calculateAge(formData.birthDate);
 
       // 2. Find or Create the permanent User based on Email
@@ -186,6 +213,7 @@ export default function RegistrationForm() {
       }
 
       // 3. Check if they are already registered for THIS specific event
+      //    (their profile was already updated above)
       const regCheckQuery = query(
         collection(db, "registrations"),
         where("eventId", "==", eventId),
@@ -195,21 +223,15 @@ export default function RegistrationForm() {
 
       if (!regCheckSnap.empty) {
         // They are already registered for this event, so just update their profile info if they want
-        if (window.confirm("You are already registered for this event! Would you like to have your profile updated with the latest details you provided?")) {
-          const internalRegId = regCheckSnap.docs[0].id;
-          await updateDoc(doc(db, "registrations", internalRegId), {
-            userId: internalUserId,
-            eventId: eventId,
-            checkedIn: false,
-            tableNumber: null,
-            status: "pending invite",
-            groupId: "Unassigned",
-            timestamp: new Date(),
-            gender: formData.gender,
-            firstName: formData.firstName,
-            lastName: formData.lastName,
-          });
-        }
+        // Keep their invite status, group and check-in as they are; only refresh the name/gender copy.
+        const internalRegId = regCheckSnap.docs[0].id;
+        await updateDoc(doc(db, "registrations", internalRegId), {
+          gender: formData.gender,
+          firstName: userProfile.firstName,
+          lastName: userProfile.lastName,
+          updatedAt: new Date(),
+        });
+        alert("You're already registered for this event. We've updated your profile with these details.");
         setLoading(false);
         return;
       } else {
@@ -223,8 +245,8 @@ export default function RegistrationForm() {
           groupId: "Unassigned",
           timestamp: new Date(),
           gender: formData.gender,
-          firstName: formData.firstName,
-          lastName: formData.lastName,
+          firstName: userProfile.firstName,
+          lastName: userProfile.lastName,
         });
       }
 
@@ -239,7 +261,7 @@ export default function RegistrationForm() {
           subject: `SY SmartMatch - Registration Received`,
           html: `
       <div style="font-family: sans-serif; color: #1E3D34; padding: 20px;">
-        <h1 style="color: #1E3D34; border-bottom: 2px solid #95B699; display: inline-block; padding-bottom: 5px;">Hi ${formData.firstName}!</h1>
+        <h1 style="color: #1E3D34; border-bottom: 2px solid #95B699; display: inline-block; padding-bottom: 5px;">Hi ${userProfile.firstName}!</h1>
         <p>Thank you for registering for SY SmartMatch.</p>
         <p>Your registration has been received and is currently being reviewed. We'll be in touch with next steps soon!</p>
         <br>
@@ -445,6 +467,7 @@ export default function RegistrationForm() {
                 type="date"
                 required
                 className="w-full p-3 border border-slate-200 rounded-lg text-gray-500 bg-white outline-none focus:ring-2 focus:ring-[#95B699]"
+                value={formData.birthDate}
                 onChange={(e) =>
                   setFormData({ ...formData, birthDate: e.target.value })
                 }
@@ -588,6 +611,7 @@ export default function RegistrationForm() {
                   type="radio"
                   name="isShomerShabbat"
                   value="yes"
+                  checked={formData.isShomerShabbat === "yes"}
                   className="accent-[#1E3D34]"
                   onChange={() =>
                     setFormData({ ...formData, isShomerShabbat: "yes" })
@@ -600,6 +624,7 @@ export default function RegistrationForm() {
                   type="radio"
                   name="isShomerShabbat"
                   value="no"
+                  checked={formData.isShomerShabbat === "no"}
                   className="accent-[#1E3D34]"
                   onChange={() =>
                     setFormData({ ...formData, isShomerShabbat: "no" })
@@ -619,6 +644,7 @@ export default function RegistrationForm() {
                   type="radio"
                   name="isShomerKashrut"
                   value="yes"
+                  checked={formData.isShomerKashrut === "yes"}
                   className="accent-[#1E3D34]"
                   onChange={() =>
                     setFormData({ ...formData, isShomerKashrut: "yes" })
@@ -631,6 +657,7 @@ export default function RegistrationForm() {
                   type="radio"
                   name="isShomerKashrut"
                   value="no"
+                  checked={formData.isShomerKashrut === "no"}
                   className="accent-[#1E3D34]"
                   onChange={() =>
                     setFormData({ ...formData, isShomerKashrut: "no" })
@@ -651,6 +678,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="dressStyle"
                     value="skirtsOnly"
+                    checked={formData.dressStyle === "skirtsOnly"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, dressStyle: "skirtsOnly" })
@@ -663,6 +691,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="dressStyle"
                     value="skirtsPants"
+                    checked={formData.dressStyle === "skirtsPants"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, dressStyle: "skirtsPants" })
@@ -684,6 +713,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="hairCovering"
                     value="willCoverHair"
+                    checked={formData.hairCovering === "willCoverHair"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({
@@ -699,6 +729,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="hairCovering"
                     value="notPlanning"
+                    checked={formData.hairCovering === "notPlanning"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, hairCovering: "notPlanning" })
@@ -711,6 +742,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="hairCovering"
                     value="openFlexible"
+                    checked={formData.hairCovering === "openFlexible"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, hairCovering: "openFlexible" })
@@ -734,6 +766,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="kohen"
                     value="yes"
+                    checked={formData.isKohen === "yes"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, isKohen: "yes" })
@@ -746,6 +779,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="kohen"
                     value="no"
+                    checked={formData.isKohen === "no"}
                     className="accent-[#1E3D34]"
                     onChange={() => setFormData({ ...formData, isKohen: "no" })}
                   />{" "}
@@ -767,6 +801,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="coverHead"
                     value="yes"
+                    checked={formData.wantsCoveredHead === "yes"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, wantsCoveredHead: "yes" })
@@ -779,6 +814,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="coverHead"
                     value="no"
+                    checked={formData.wantsCoveredHead === "no"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({ ...formData, wantsCoveredHead: "no" })
@@ -791,6 +827,7 @@ export default function RegistrationForm() {
                     type="radio"
                     name="coverHead"
                     value="noPreference"
+                    checked={formData.wantsCoveredHead === "noPreference"}
                     className="accent-[#1E3D34]"
                     onChange={() =>
                       setFormData({

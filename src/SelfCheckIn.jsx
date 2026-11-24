@@ -9,6 +9,7 @@ import {
   updateDoc,
   orderBy,
   limit,
+  addDoc,
 } from "firebase/firestore";
 
 const SelfCheckIn = () => {
@@ -47,13 +48,23 @@ const handleCheckIn = async (e) => {
 
       // 2. Find the user by Email or Phone
       const cleanInput = input.trim().toLowerCase();
-      const userQuery = query(collection(db, "users"), where("email", "==", cleanInput));
+      // Older profiles kept the email exactly as typed, so also try the raw input
+      const emailVariants = [...new Set([cleanInput, input.trim()])].filter(Boolean);
+      const userQuery = query(collection(db, "users"), where("email", "in", emailVariants));
       let userSnap = await getDocs(userQuery);
       console.log("User query results with email:", userSnap.size);
 
       if (userSnap.empty) {
-        const phoneInput = input.replace(/\D/g, "");
-        const phoneQuery = query(collection(db, "users"), where("phone", "==", phoneInput));
+        // Phones were stored as typed before being normalized to digits, so try common shapes
+        let digits = input.replace(/\D/g, "");
+        if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
+        const variants = new Set([input.trim(), digits, `1${digits}`, `+1${digits}`]);
+        if (digits.length === 10) {
+          const [a, b, c] = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6)];
+          [`(${a}) ${b}-${c}`, `(${a})${b}-${c}`, `${a}-${b}-${c}`, `${a}.${b}.${c}`, `${a} ${b} ${c}`, `+1 (${a}) ${b}-${c}`, `+1 ${a}-${b}-${c}`]
+            .forEach((v) => variants.add(v));
+        }
+        const phoneQuery = query(collection(db, "users"), where("phone", "in", [...variants].filter(Boolean)));
         userSnap = await getDocs(phoneQuery);
         console.log("User query results with phone:", userSnap.size);
       }
@@ -241,4 +252,4 @@ const handleCheckIn = async (e) => {
   );
 };
 
-export default SelfCheckIn;
+export default SelfCheckIn;

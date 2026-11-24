@@ -8,6 +8,7 @@ import {
   Star,
   AlertCircle,
   Pause,
+  Coffee,
 } from "lucide-react";
 
 export default function LiveRoundView({ event, user, attendees, users }) {
@@ -26,6 +27,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
   const containerRef = useRef(null);
   const debugging = false; // Set to true to show the debug overlay
   const [showDebug, setShowDebug] = useState(false);
+  const [lastSeenRound, setLastSeenRound] = useState(null);
 
   // This logic runs every time the partner changes
   // --- COMPATIBILITY FILTER ---
@@ -34,7 +36,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
 
     // If user is a male Kohen and partner is female divorced, return false
     if (
-      me.isKohen === true &&
+      (me.isKohen === "yes" || me.isKohen === true) &&
       me.gender === "man" &&
       partner.gender === "woman" &&
       partner.maritalStatus === "Divorced"
@@ -61,12 +63,13 @@ export default function LiveRoundView({ event, user, attendees, users }) {
   // --- 1. PRIORITY LOGIC ---
   // Find if the user has already prioritized someone in this specific event
   const existingPriorityMatch = user.feedbackData?.find(
-    (f) => f.event === event.id && f.priority === true,
+    (f) => f.event === event.id && f.isPriority === true,
   );
 
   const handlePriorityToggle = () => {
     // If turning on and someone else is already prioritized
-    if (!isPriority && existingPriorityMatch) {
+    // (partner is assigned later in this render; it's set by the time this click handler runs)
+    if (!isPriority && existingPriorityMatch && existingPriorityMatch.partnerId !== partner?.id) {
       setShowPriorityConfirm(true);
     } else {
       setIsPriority(!isPriority);
@@ -183,7 +186,8 @@ export default function LiveRoundView({ event, user, attendees, users }) {
 
 // --- 3. MATH & STOP LOGIC ---
   const startTime = event.startTime.toDate();
-  const effectiveNow = event.isPaused ? event.pausedAt.toDate() : now;
+  const effectiveNow =
+    event.isPaused && event.pausedAt ? event.pausedAt.toDate() : now;
   const secondsSinceStart = Math.floor((effectiveNow - startTime) / 1000);
 
   const startBuffer = 60; 
@@ -249,13 +253,16 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     ? `Table ${nextNum} - ${groupName}`
     : activeRoundTable;
 
-  // reset decision state when state changes
-  useEffect(() => {
+  // reset decision state when the round changes
+  // (done during render instead of in a useEffect, because a hook here would
+  // run after the early return above and break React's hook ordering)
+  if (lastSeenRound !== currentRound) {
+    setLastSeenRound(currentRound);
     setDecisionMade(false);
     setPendingSelection(null);
     setOptionalNotes("");
     setIsPriority(false);
-  }, [currentRound]);
+  }
 
   // --- 5. PARTNER MATCHING ---
   const matchedAttendee = attendees.find((a) => {
@@ -269,7 +276,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
     if (attendeeUser.gender === user.gender) return false;
 
     // 2. Group check
-    if (!a.groupId.toLowerCase().includes(groupName.toLowerCase()))
+    if ((a.groupId || "").toLowerCase() !== groupName.toLowerCase())
       return false;
 
     // 3. Table Calculation
@@ -326,7 +333,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       partnerId: partner.id,
       partnerName: `${partner.firstName} ${partner.lastName}`,
       interested: pendingSelection,
-      isPriority: isPriority,
+      isPriority: pendingSelection === "yes" && isPriority,
       tableNumber: activeRoundTable,
       round: currentRound,
       optionalNotes: optionalNotes,
@@ -338,9 +345,9 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       let currentFeedback = user.feedbackData || [];
 
       // 2. Clear existing priority for this event if the new entry is priority
-      if (isPriority) {
+      if (newEntry.isPriority) {
         currentFeedback = currentFeedback.map((f) =>
-          f.event === event.id ? { ...f, priority: false } : f,
+          f.event === event.id ? { ...f, isPriority: false } : f,
         );
       }
 
@@ -584,7 +591,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
       <div className="flex flex-col gap-4">
         {/* Interest Buttons */}
         <button
-          onClick={() => setPendingSelection("yes")}
+          onClick={() => handleInterestedSelection("yes")}
           className={`py-6 rounded-2xl text-3xl font-black border-2 transition-all ${
             pendingSelection === "yes"
               ? "bg-green-500 border-[#1E3D34] text-white"
@@ -605,7 +612,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
         )}
 
         <button
-          onClick={() => setPendingSelection("maybe")}
+          onClick={() => handleInterestedSelection("maybe")}
           className={`py-6 rounded-2xl text-3xl font-black border-2 transition-all ${
             pendingSelection === "maybe"
               ? "bg-[#95B699] border-[#1E3D34] text-[#1E3D34]"
@@ -616,7 +623,7 @@ export default function LiveRoundView({ event, user, attendees, users }) {
         </button>
 
         <button
-          onClick={() => setPendingSelection("no")}
+          onClick={() => handleInterestedSelection("no")}
           className={`py-4 rounded-2xl text-xl font-bold border-2 transition-all ${
             pendingSelection === "no"
               ? "bg-red-400 border-[#1E3D34] text-white"
