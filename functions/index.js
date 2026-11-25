@@ -381,7 +381,7 @@ async function runAiShadchanFunctions(eventId) {
         };
 
         const currentCandidate = pipeline[0];
-        const openingMessageText = `Hi ${user.firstName || "there"}!\n\nIt's SY SmartMatch, you have a mutual match with ${currentCandidate.name}.\n\nWould you be interested in setting up a first date?`;
+        const openingMessageText = `Hi ${user.firstName || "there"}! It's SY SmartMatch, you have a mutual match with ${currentCandidate.name}.\n\nWould you be interested in setting up a first date?`;
 
         sessionData.messages.push({
           sender: "ai",
