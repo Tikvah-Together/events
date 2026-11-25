@@ -614,7 +614,23 @@ async function processClaimedTurn(ref, sessionData) {
     // Didn't happen: wipe the old plan so the time-setting steps start fresh.
     if (dd.followUpSent && ai.dateOutcome === "didnt_happen") basePatch.dateDetails = admin.firestore.FieldValue.delete();
     // Moving on to someone new: what was settled with the last person doesn't carry over.
-    if (ai.nextIndex > curIdx) basePatch.dateDetails = admin.firestore.FieldValue.delete();
+    if (ai.nextIndex > curIdx) {
+      basePatch.dateDetails = admin.firestore.FieldValue.delete();
+      basePatch.outstandingAsk = admin.firestore.FieldValue.delete();
+    }
+
+    // Clears the question we just answered, but not one that arrived while we were generating
+    // (deleting that would lose the newer question entirely).
+    const answeredPendingPatch = async () => {
+      const answered = sessionData.pendingInboundQuestion;
+      const fresh = (await ref.get()).data()?.pendingInboundQuestion;
+      if (!fresh) return {};
+      if (answered && fresh.askedAt === answered.askedAt) {
+        return { pendingInboundQuestion: admin.firestore.FieldValue.delete() };
+      }
+      console.log(`[Shadchan] A newer question arrived for ${sessionData.userId} mid-turn; keeping it.`);
+      return {};
+    };
 
     if (ai.matchConfirmed && ai.confirmedCandidateId) {
       await recordConversationalMatch(sessionData.eventId, sessionData.userId, ai.confirmedCandidateId);
@@ -701,18 +717,31 @@ async function processClaimedTurn(ref, sessionData) {
       ai.replyText = "Can you answer that last question first?";
     }
 
-    if (ai.action === "ask_partner" && ai.crossSessionMessage) {
+    // Already waiting on them for this same question: tell our user, but don't text the other side again.
+    // (A "thanks" while waiting used to re-send the question, so they got it two or three times.)
+    const waitingOn = sessionData.outstandingAsk;
+    const waitingFresh = waitingOn && Date.now() - new Date(waitingOn.askedAt).getTime() < 24 * 3600000;
+    if (ai.action === "ask_partner" && ai.crossSessionMessage && waitingFresh && isSameQuestion(waitingOn.question, ai.crossSessionMessage)) {
+      console.log(`[Shadchan] Not re-sending to partner; same question already waiting: "${waitingOn.question}"`);
+      await commitTurn(ref, { ...basePatch, status: "paused_waiting_on_partner" }, [msg("ai", ai.replyText)]);
+      await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
+
+    } else if (ai.action === "ask_partner" && ai.crossSessionMessage) {
       const partnerRef = candidateId ? sessionRefFor(candidateId) : null;
       const partnerSnap = partnerRef ? await partnerRef.get() : null;
       const p = partnerSnap?.exists ? partnerSnap.data() : null;
 
-      if (!p) {
+      if (!p || p.status === "opted_out") {
         const fallback = "Can't reach them right now. Wait, or move on to the next one?";
         await commitTurn(ref, { ...basePatch, status: "active" }, [msg("ai", fallback)]);
         await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, fallback));
 
       } else {
-        await commitTurn(ref, { ...basePatch, status: "paused_waiting_on_partner" }, [msg("ai", ai.replyText)]);
+        await commitTurn(ref, {
+          ...basePatch,
+          status: "paused_waiting_on_partner",
+          outstandingAsk: { question: ai.crossSessionMessage, askedAt: stamp() }
+        }, [msg("ai", ai.replyText)]);
         await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
 
         await commitCrossSession(partnerRef, {
@@ -736,8 +765,9 @@ async function processClaimedTurn(ref, sessionData) {
       if (counterpartId) {
         const askerRef = sessionRefFor(counterpartId);
         const askerSnap = await askerRef.get();
-        if (askerSnap.exists) {
-          await commitCrossSession(askerRef, { status: "active" }, [msg("system", note)]);
+        if (askerSnap.exists && askerSnap.data().status !== "opted_out") {
+          // They have their answer, so they're no longer waiting on anything from us.
+          await commitCrossSession(askerRef, { status: "active", outstandingAsk: admin.firestore.FieldValue.delete() }, [msg("system", note)]);
           console.log(`[Shadchan] Delivering to asker ${askerSnap.data().userPhoneNumber}: note="${note}" attachments=${attachments.length}`);
           const askerSendResult = await sendWithAttachments(askerSnap.data().userPhoneNumber, note, attachments);
           console.log(`[Shadchan] Asker send result:`, askerSendResult);
@@ -750,10 +780,7 @@ async function processClaimedTurn(ref, sessionData) {
         ai.replyText = "Couldn't reach them just now. Can you text me again in a bit?";
       }
 
-      await commitTurn(ref, {
-        ...basePatch,
-        pendingInboundQuestion: admin.firestore.FieldValue.delete()
-      }, [msg("ai", ai.replyText)]);
+      await commitTurn(ref, { ...basePatch, ...(await answeredPendingPatch()) }, [msg("ai", ai.replyText)]);
       await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
 
     } else if (ai.action === "tell_partner") {
@@ -763,7 +790,7 @@ async function processClaimedTurn(ref, sessionData) {
       if (counterpartId) {
         const otherRef = sessionRefFor(counterpartId);
         const otherSnap = await otherRef.get();
-        if (otherSnap.exists) {
+        if (otherSnap.exists && otherSnap.data().status !== "opted_out") {
           await commitCrossSession(otherRef, { status: "active" }, [msg("system", ai.crossSessionMessage)]);
           console.log(`[Shadchan] Telling ${otherSnap.data().userPhoneNumber}: note="${ai.crossSessionMessage}" attachments=${attachments.length}`);
           const tellResult = await sendWithAttachments(otherSnap.data().userPhoneNumber, ai.crossSessionMessage, attachments);
@@ -777,7 +804,7 @@ async function processClaimedTurn(ref, sessionData) {
         ai.replyText = "Couldn't reach them just now. Can you text me again in a bit?";
       }
 
-      await commitTurn(ref, { ...basePatch, pendingInboundQuestion: admin.firestore.FieldValue.delete() }, [msg("ai", ai.replyText)]);
+      await commitTurn(ref, { ...basePatch, ...(await answeredPendingPatch()) }, [msg("ai", ai.replyText)]);
       await markIfBlocked(ref, await sendTelnyxMessage(sessionData.userPhoneNumber, ai.replyText));
 
     } else if (staySilent) {
@@ -954,6 +981,7 @@ exports.sweepStalledSessions = onSchedule({
       batch.set(ref, {
         status: "active",
         processingUntil: null,
+        outstandingAsk: admin.firestore.FieldValue.delete(),
         messages: admin.firestore.FieldValue.arrayUnion({ sender: "system", text: timeoutText, timestamp: stamp() })
       }, { merge: true });
 
@@ -989,6 +1017,38 @@ function humanize(text) {
     .trim();
 }
 
+// "tonight, Wednesday, Nov 25" -> "Wednesday, Nov 25". A relative word next to a real date only
+// confuses: the other side may read it after midnight, when "tonight" sounds like it's already over.
+const WEEKDAY_RE = "(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day";
+function stripRelativeDayWords(text) {
+  if (!text || !new RegExp(`\\b${WEEKDAY_RE}\\b`, "i").test(text)) return text;
+  return text
+    .replace(new RegExp(`\\b(?:tonight|today|tomorrow|this evening)\\b\\s*,?\\s*(?=\\(?\\s*(?:on\\s+)?${WEEKDAY_RE}\\b)`, "gi"), "")
+    .replace(new RegExp(`(${WEEKDAY_RE}[^.!?]*?)\\s*\\(?\\b(?:tonight|today|tomorrow)\\b\\)?`, "gi"), "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+// The days, dates and times a message mentions, e.g. "wednesday nov 25 7 00 pm".
+function dateFingerprint(text) {
+  const t = String(text || "").toLowerCase();
+  const parts = t.match(/\b(?:mon|tues|wednes|thurs|fri|satur|sun)day\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\b\d{1,2}(?::\d{2})?\b|\b[ap]\.?m\b/g) || [];
+  const norm = parts.map(x => /^\d/.test(x) ? x.replace(/:00$/, "") : x.replace(/\./g, "").slice(0, 3));
+  return [...new Set(norm)].sort().join(" "); // order-free: "7 PM Wednesday" == "Wednesday at 7:00 PM"
+}
+
+// Is this just the question we already sent, said again in different words?
+function isSameQuestion(a, b) {
+  const fa = dateFingerprint(a), fb = dateFingerprint(b);
+  if (fa || fb) return fa === fb;
+  const words = (x) => new Set(String(x || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(w => w.length > 2));
+  const A = words(a), B = words(b);
+  if (!A.size || !B.size) return false;
+  let shared = 0;
+  A.forEach(w => { if (B.has(w)) shared++; });
+  return shared / Math.max(A.size, B.size) >= 0.6;
+}
+
 function sanitizeAiPayload(p, sessionData, currentIdx) {
   const len = (sessionData.candidatePipeline || []).length;
 
@@ -996,7 +1056,7 @@ function sanitizeAiPayload(p, sessionData, currentIdx) {
   if (nextIndex < currentIdx) nextIndex = currentIdx;   // never rewind
   if (nextIndex > len) nextIndex = len;                 // never run off the end
 
-  const reply = humanize(p.replyText);
+  const reply = stripRelativeDayWords(humanize(p.replyText));
 
   return {
     replyText: reply || "Sorry, can you resend that?",
@@ -1006,7 +1066,7 @@ function sanitizeAiPayload(p, sessionData, currentIdx) {
     confirmedCandidateId: p.confirmedCandidateId || sessionData.candidatePipeline?.[currentIdx]?.candidateId || "",
     // Only truly done when we've actually exhausted the pipeline.
     closeSession: p.closeSession === true && nextIndex >= len,
-    crossSessionMessage: humanize(p.crossSessionMessage || ""),
+    crossSessionMessage: stripRelativeDayWords(humanize(p.crossSessionMessage || "")),
     mediaKeys: Array.isArray(p.mediaKeys) ? p.mediaKeys : [],
     agreedTime: humanize(p.agreedTime || ""),
     address: String(p.address || "").trim(),
@@ -1025,6 +1085,10 @@ async function generateAiResponseWithState(sessionData, ownMedia = []) {
   const dd = sessionData.dateDetails || {};
 
   const pending = sessionData.pendingInboundQuestion || null;
+  // A question we sent the other side that they haven't answered yet (expires after a day).
+  const waiting = sessionData.outstandingAsk && Date.now() - new Date(sessionData.outstandingAsk.askedAt).getTime() < 24 * 3600000
+    ? sessionData.outstandingAsk : null;
+  const nyHour = Number(new Intl.DateTimeFormat("en-US", { timeZone: SHADCHAN_TZ, hourCycle: "h23", hour: "numeric" }).format(new Date()));
   if (pending) {
     console.log(`[Shadchan] Pending question for ${firstName} from ${pending.fromName}: "${pending.question}"`);
   }
@@ -1035,7 +1099,10 @@ You are a shadchan texting ${firstName} from your own phone. To them you're a re
 TODAY
 ${nowForPrompt()} (New York time).
 Next two weeks: ${upcomingDaysForPrompt(14)}.
-Use this to turn "tomorrow", "Sunday" or "next Thursday" into a real date. If a day could mean two dates (like "tomorrow" late at night), check which one they mean. When you confirm a time, always say the day, date and time, never just "tomorrow" or "tonight".
+Use this to turn "tomorrow", "Sunday" or "next Thursday" into a real date. If a day could mean two dates (like "tomorrow" late at night), check which one they mean.
+Never write "today", "tonight" or "tomorrow" yourself, in replyText or crossSessionMessage. Always say the weekday, date and time, like "Wednesday, Nov 25 at 7:00 PM". The other person may read it hours later or after midnight.
+${nyHour < 5 ? `It's after midnight, so people still think of it as last night: when they say "tonight" or "tomorrow" they probably mean ${upcomingDaysForPrompt(2).split("; ")[0].replace(" (today)", "")} evening or later. Check if unsure.` : ""}
+If someone says a time has already passed or a date is wrong, check it against the date and time above before agreeing. If they're mistaken, kindly give the actual weekday and date. Never pass a mistaken claim on to the other side.
 
 HOW YOU TEXT
 - Keep it short. One sentence is normal, two short ones at most. Aim for under 15 words.
@@ -1066,6 +1133,11 @@ They are candidate ${currentIdx + 1} of ${pipeline.length}. Do not mention anyon
 ${pending ? `${pending.fromName} asked ${firstName}: "${pending.question}"
 Whatever ${firstName} says back, even a counter-offer like "how about Monday?", is the answer. Use answer_partner. If ${firstName} sends a file instead, that IS the answer: use forward_media with that file's key, no words needed.` : ""}
 
+${waiting ? `WAITING ON ${otherName.toUpperCase()}
+You already asked ${otherName}: "${waiting.question}". They haven't answered yet. Their answer reaches ${firstName} automatically, the moment they reply.
+- Don't ask it again, re-word it, or remind ${otherName}. If ${firstName} only says thanks or ok, reply in a few words with action continue.
+- Use ask_partner only if ${firstName} now wants something different (a new day or time). Then crossSessionMessage is just the new request, said once, like "Actually, could he do Wednesday, Nov 25 at 7:00 PM instead?"
+` : ""}
 WHERE THE DATE STANDS
 ${dd.time ? `Time agreed: ${dd.time}.` : "No time agreed yet."}
 ${dd.address ? `Address: ${dd.address}.` : (dd.time ? "Address: not received yet." : "")}
