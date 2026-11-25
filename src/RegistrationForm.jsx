@@ -11,6 +11,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { useSearchParams } from "react-router-dom";
+import { escapeHtml, titleCase } from "./emailFormat";
 
 const SEPHARDIC_LIST = [
   "Syrian",
@@ -29,6 +30,7 @@ export default function RegistrationForm() {
   const [events, setEvents] = useState([]);
   const [selectedEventName, setSelectedEventName] = useState(""); // To show name if ID is hidden
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   const [ageGatePassed, setAgeGatePassed] = useState(false);
   const [tempDob, setTempDob] = useState("");
@@ -261,7 +263,7 @@ export default function RegistrationForm() {
           subject: `SY SmartMatch - Registration Received`,
           html: `
       <div style="font-family: sans-serif; color: #1E3D34; padding: 20px;">
-        <h1 style="color: #1E3D34; border-bottom: 2px solid #95B699; display: inline-block; padding-bottom: 5px;">Hi ${userProfile.firstName}!</h1>
+        <h1 style="color: #1E3D34; border-bottom: 2px solid #95B699; display: inline-block; padding-bottom: 5px;">Hi ${escapeHtml(titleCase(userProfile.firstName))}!</h1>
         <p>Thank you for registering for SY SmartMatch.</p>
         <p>Your registration has been received and is currently being reviewed. We'll be in touch with next steps soon!</p>
         <br>
@@ -271,16 +273,36 @@ export default function RegistrationForm() {
         },
       });
 
-      alert(
-        "Thank you! Your registration has been received.\nYou’ll receive a confirmation email shortly.",
-      );
-      window.location.reload();
+      setSubmitted(true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       console.error("Registration Error:", err);
       alert("Error saving registration.");
     }
     setLoading(false);
   };
+
+  // Thank-you message, shown on the page instead of a browser pop-up
+  if (submitted) {
+    return (
+      <div className="min-h-screen py-12 px-4 text-[#1E3D34]">
+        <div className="max-w-md mx-auto bg-[#DEE8DF] p-6 sm:p-10 rounded-2xl border border-[#95B699] shadow-sm text-center">
+          <p className="font-serif text-xl text-[#1E3D34] mb-6">SY SmartMatch</p>
+          <div className="bg-white/70 rounded-xl p-6 sm:p-8">
+            <h2 className="font-serif text-2xl text-[#1E3D34] mb-3">
+              Thanks for signing up!
+            </h2>
+            <p className="text-slate-700">
+              We'll review your information and be in touch soon.
+            </p>
+            <p className="text-sm italic text-slate-500 mt-4">
+              Keep an eye on your email.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // If the user has not verified their age yet, show ONLY the Age Gate
   if (!ageGatePassed) {

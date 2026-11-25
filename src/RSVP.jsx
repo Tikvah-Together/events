@@ -10,6 +10,12 @@ import {
   updateDoc,
   addDoc,
 } from "firebase/firestore";
+import {
+  escapeHtml,
+  titleCase,
+  eventDetailsBoxHtml,
+  cancelLineHtml,
+} from "./emailFormat";
 
 const RsvpPage = () => {
   const [step, setStep] = useState("loading");
@@ -109,14 +115,12 @@ const RsvpPage = () => {
           message: {
             subject: "SY SmartMatch - You're Confirmed",
             html: `
-      <div style="font-family: sans-serif; color: #1E3D34;">
-        <p>Hi ${attendee.firstName},</p>
+      <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
+        <p>Hi ${escapeHtml(titleCase(attendee.firstName))},</p>
         <p>You're <strong>confirmed</strong> for the upcoming SY SmartMatch event.<br>We're looking forward to having you!</p>
-        <p>Full event details will be sent the day before the event.</p>
-        <p style="margin-top: 20px; font-size: 13px;">
-          If your availability changes before the event, you can update your status here: <a href="${cancelUrl.toString()}" style="color: #95B699; font-weight: bold;">Cancel Registration</a>
-        </p>
-        <br>
+        ${eventDetailsBoxHtml(eventData, { fullAddress: true })}
+        <p>We'll send a reminder the day before.</p>
+        ${cancelLineHtml(cancelUrl.toString())}
         <p style="font-weight: bold;">SY SmartMatch Team</p>
       </div>
     `,

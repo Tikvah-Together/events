@@ -11,6 +11,7 @@ import {
   limit,
   addDoc,
 } from "firebase/firestore";
+import { escapeHtml, titleCase } from "./emailFormat";
 
 const SelfCheckIn = () => {
   const [input, setInput] = useState("");
@@ -176,7 +177,7 @@ const handleCheckIn = async (e) => {
             subject: "SY SmartMatch: Event Login & Check-In Confirmation",
             html: `
         <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
-          <p>Hi ${userData.firstName},</p>
+          <p>Hi ${escapeHtml(titleCase(userData.firstName))},</p>
           <p>Here is your SY SmartMatch event login link:</p>
           <p style="margin-top: 30px;">${eventURL}</p>
           <p style="font-weight: bold; color: #1E3D34;">SY SmartMatch Team</p>

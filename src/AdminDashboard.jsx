@@ -18,6 +18,13 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import {
+  escapeHtml,
+  titleCase,
+  eventDetailsBoxHtml,
+  cancelLineHtml,
+  SUPPORT_PHONE,
+} from "./emailFormat";
+import {
   Plus,
   Trash2,
   Calendar,
@@ -510,7 +517,7 @@ export default function AdminDashboard() {
           subject: "SY SmartMatch: Event Login & Check-In Confirmation",
           html: `
       <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
-        <p>Hi ${userData.firstName},</p>
+        <p>Hi ${escapeHtml(titleCase(userData.firstName))},</p>
         <p>Here is your SY SmartMatch event login link:</p>
         <p style="margin-top: 30px;">${eventURL}</p>
         <p style="font-weight: bold; color: #1E3D34;">SY SmartMatch Team</p>
@@ -586,21 +593,17 @@ export default function AdminDashboard() {
           subject: "SY SmartMatch: Event Details & Reminder",
           html: `
       <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
-        <p>Hi ${userData.firstName},</p>
+        <p>Hi ${escapeHtml(titleCase(userData.firstName))},</p>
         <p>Looking forward to seeing you at the SY SmartMatch event.</p>
-        <div style="background: #DEE8DF; padding: 20px; border-radius: 12px; border: 1px solid #95B699; margin: 20px 0;">
-          <p style="margin-top: 0;"><strong>Event details:</strong></p>
-          <strong>Date:</strong> ${eventData.scheduledAt?.toDate().toLocaleDateString()}<br>
-          <strong>Time:</strong> ${eventData.scheduledAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}<br>
-          <strong>Location:</strong> ${eventData.fullAddress || eventData.generalLocation}
-        </div>
+        ${eventDetailsBoxHtml(eventData, { fullAddress: true })}
         <p>Upon arrival, please check in at the front desk or scan the QR code on site.</p>
         <p>You’ll receive your starting table number and be guided where to sit.</p>
         <p>Please bring your phone fully charged, as it will be used during the event.</p>
         <p>To ensure the best experience, please arrive on time, as late arrival may result in missing some of your curated dates.</p>
-        
-        <p style="margin-top: 30px;">If anything changes: <a href="${cancelUrl}" style="color: #95B699; font-weight: bold;">Cancel Registration</a></p>
-        
+
+        <p style="margin-top: 24px;"><strong>Questions?</strong> Text us at <strong>${SUPPORT_PHONE}</strong></p>
+        ${cancelLineHtml(cancelUrl)}
+
         <p style="font-weight: bold; color: #1E3D34;">SY SmartMatch Team</p>
       </div>
     `,
@@ -624,7 +627,7 @@ export default function AdminDashboard() {
           subject: "SY SmartMatch – Final Reminder to Confirm Your Spot",
           html: `
       <div style="font-family: sans-serif; color: #1E3D34; max-width: 600px;">
-        <p>Hi ${userData.firstName},</p>
+        <p>Hi ${escapeHtml(titleCase(userData.firstName))},</p>
         <p>This is a final reminder to confirm your spot for the upcoming SY SmartMatch event.</p>
         <p>We’ll be finalizing the list shortly, so please confirm as soon as possible if you’d like to attend.</p>
 
@@ -675,17 +678,10 @@ export default function AdminDashboard() {
             subject: `SY SmartMatch - You're Invited`,
             html: `
       <div style="font-family: sans-serif; text-align: center; max-width: 500px; margin: auto; border: 2px solid #95B699; padding: 30px; border-radius: 20px; background-color: #ffffff;">
-        <h2 style="color: #1E3D34; font-size: 24px;">Hi ${a.firstName}!</h2>
+        <h2 style="color: #1E3D34; font-size: 24px;">Hi ${escapeHtml(titleCase(a.firstName))}!</h2>
         <p style="color: #1E3D34;">We're excited to invite you to <strong>SY SmartMatch</strong>.</p>
-
-        <div style="background: #DEE8DF; padding: 15px; border-radius: 10px; margin: 20px 0; color: #1E3D34; text-align: left;">
-          <strong>Event Details:</strong><br>
-          Date: ${selectedEvent?.scheduledAt?.toDate().toLocaleDateString() || "TBA"}<br>
-          Time: ${selectedEvent?.scheduledAt?.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) || "TBA"}<br>
-          Location: ${selectedEvent?.generalLocation || "TBA"}
-        </div>
-        
-        <p style="font-size: 13px; color: #95B699; font-weight: bold;">
+        ${eventDetailsBoxHtml(selectedEvent, { fullAddress: false, title: "Event Details:" })}
+        <p style="font-size: 13px; color: #1E3D34; font-weight: bold;">
           Please confirm your spot within 3 days to secure your place.
         </p>
         
